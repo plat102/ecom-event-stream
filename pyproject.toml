@@ -12,6 +12,7 @@ confluent-kafka = "^2.14.2"
 pytest = "^9.0.3"
 pydantic-settings = "^2.14.1"
 loguru = "^0.7.3"
+pymongo = "^4.17.0"
 
 
 [tool.pytest.ini_options]

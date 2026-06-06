@@ -1,0 +1,132 @@
+version: '2'
+services:
+  kafka-0:
+    image: 'confluentinc/cp-kafka:7.6.1'
+    networks:
+      - streaming-network
+    hostname: kafka-0
+    container_name: kafka-0
+    ports:
+      - '9094:9094'
+    volumes:
+      - "kafka_data_0:/var/lib/kafka/data"
+      - "./kafka/config/kafka/kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf"
+    environment:
+      - KAFKA_NODE_ID=0
+      - KAFKA_PROCESS_ROLES=controller,broker
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=0@kafka-0:9093,1@kafka-1:9093,2@kafka-2:9093
+      - CLUSTER_ID=${CLUSTER_ID}
+      - KAFKA_LISTENERS=CONTROLLER://:9093,INTERNAL://:29092,DOCKER_NETWORK://:9092,EXTERNAL://0.0.0.0:9094
+      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka-0:29092,DOCKER_NETWORK://kafka-0:9092,EXTERNAL://localhost:9094
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,DOCKER_NETWORK:SASL_PLAINTEXT,EXTERNAL:SASL_PLAINTEXT
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=3
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=3
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_NUM_PARTITIONS=3
+      - KAFKA_SASL_ENABLED_MECHANISMS=PLAIN
+      - KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL=PLAIN
+      - KAFKA_OPTS=-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf
+  kafka-1:
+    image: 'confluentinc/cp-kafka:7.6.1'
+    networks:
+      - streaming-network
+    hostname: kafka-1
+    container_name: kafka-1
+    ports:
+      - '9194:9094'
+    volumes:
+      - "kafka_data_1:/var/lib/kafka/data"
+      - "./kafka/config/kafka/kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf"
+    environment:
+      - KAFKA_NODE_ID=1
+      - KAFKA_PROCESS_ROLES=controller,broker
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=0@kafka-0:9093,1@kafka-1:9093,2@kafka-2:9093
+      - CLUSTER_ID=${CLUSTER_ID}
+      - KAFKA_LISTENERS=CONTROLLER://:9093,INTERNAL://:29092,DOCKER_NETWORK://:9092,EXTERNAL://0.0.0.0:9094
+      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka-1:29092,DOCKER_NETWORK://kafka-1:9092,EXTERNAL://localhost:9194
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,DOCKER_NETWORK:SASL_PLAINTEXT,EXTERNAL:SASL_PLAINTEXT
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=3
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=3
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_NUM_PARTITIONS=3
+      - KAFKA_SASL_ENABLED_MECHANISMS=PLAIN
+      - KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL=PLAIN
+      - KAFKA_OPTS=-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf
+  kafka-2:
+    image: 'confluentinc/cp-kafka:7.6.1'
+    networks:
+      - streaming-network
+    hostname: kafka-2
+    container_name: kafka-2
+    ports:
+      - '9294:9094'
+    volumes:
+      - "kafka_data_2:/var/lib/kafka/data"
+      - "./kafka/config/kafka/kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf"
+    environment:
+      - KAFKA_NODE_ID=2
+      - KAFKA_PROCESS_ROLES=controller,broker
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=0@kafka-0:9093,1@kafka-1:9093,2@kafka-2:9093
+      - CLUSTER_ID=${CLUSTER_ID}
+      - KAFKA_LISTENERS=CONTROLLER://:9093,INTERNAL://:29092,DOCKER_NETWORK://:9092,EXTERNAL://0.0.0.0:9094
+      - KAFKA_ADVERTISED_LISTENERS=INTERNAL://kafka-2:29092,DOCKER_NETWORK://kafka-2:9092,EXTERNAL://localhost:9294
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,DOCKER_NETWORK:SASL_PLAINTEXT,EXTERNAL:SASL_PLAINTEXT
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_INTER_BROKER_LISTENER_NAME=INTERNAL
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=3
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=3
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+      - KAFKA_NUM_PARTITIONS=3
+      - KAFKA_SASL_ENABLED_MECHANISMS=PLAIN
+      - KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL=PLAIN
+      - KAFKA_OPTS=-Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf
+  akhq:
+    image: 'tchiotludo/akhq:0.24.0'
+    networks:
+      - streaming-network
+    container_name: akhq
+    ports:
+      - '8180:8080'
+    environment:
+      AKHQ_CONFIGURATION: |
+        akhq:
+          connections:
+            kafka-server:
+              properties:
+                bootstrap.servers: "kafka-0:9092,kafka-1:9092,kafka-2:9092"
+                security.protocol: SASL_PLAINTEXT
+                sasl.mechanism: PLAIN
+                sasl.jaas.config: org.apache.kafka.common.security.plain.PlainLoginModule required username="kafka" password="${AKHQ_KAFKA_SASL_PASSWORD}";
+          security:
+            default-group: no-roles
+            basic-auth:
+              - username: admin
+                password: "${AKHQ_ADMIN_PASSWORD_HASH}"
+                passwordHash: SHA256
+                groups:
+                - admin
+        micronaut:
+            security:
+              enabled: true
+              token:
+                jwt:
+                  signatures:
+                    secret:
+                      generator:
+                        secret: "${AKHQ_JWT_SECRET}"
+
+networks:
+  streaming-network:
+    external: true
+
+volumes:
+  kafka_data_0:
+    driver: local
+  kafka_data_1:
+    driver: local
+  kafka_data_2:
+    driver: local

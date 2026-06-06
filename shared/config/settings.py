@@ -20,14 +20,22 @@ class Settings(BaseSettings):
     SOURCE_KAFKA_SASL_USERNAME: str = ""
     SOURCE_KAFKA_SASL_PASSWORD: str = ""
 
-    # Local Kafka (self-hosted)
-    LOCAL_KAFKA_BROKERS: str = ""
-    LOCAL_KAFKA_TOPIC: str = ""
-    LOCAL_KAFKA_DLQ_TOPIC: str = ""
+    # Sink Kafka (self-hosted)
+    SINK_KAFKA_BROKERS: str = ""
+    SINK_KAFKA_TOPIC: str = ""
+    SINK_KAFKA_DLQ_TOPIC: str = ""
+    SINK_KAFKA_SECURITY_PROTOCOL: str = "SASL_PLAINTEXT"
+    SINK_KAFKA_SASL_MECHANISM: str = "PLAIN"
+    SINK_KAFKA_SASL_USERNAME: str = "kafka"
+    SINK_KAFKA_SASL_PASSWORD: str = ""
 
     # MongoDB
     MONGO_URI: str = ""
     MONGO_DB: str = ""
+
+    # Tuning
+    BATCH_SIZE: int = 500
+    FLUSH_INTERVAL_SECONDS: float = 2.0
 
     # Logging
     LOG_FORMAT: str = "pretty"  # "pretty" | "json"

@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "ecom-event-stream"
+version = "0.1.0"
+description = "Ecom event streaming pipeline"
+authors = ["thuphan"]
+packages = [{ include = "shared" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+python-dotenv = "^1.2.2"
+confluent-kafka = "^2.14.2"
+pytest = "^9.0.3"
+pydantic-settings = "^2.14.1"
+loguru = "^0.7.3"
+
+
+[tool.pytest.ini_options]
+pythonpath = [".", "apps/ingestion/src", "apps/processing/src"]
+testpaths = ["apps"]
+
+[tool.ruff]
+line-length = 99
+target-version = "py312"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

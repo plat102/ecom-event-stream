@@ -18,7 +18,7 @@ class KafkaConsumerClient:
 
     def close(self) -> None:
         self._consumer.close()
-  
+
     def __enter__(self) -> Self:
         return self
 

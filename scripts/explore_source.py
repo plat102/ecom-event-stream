@@ -18,7 +18,7 @@ from shared.config.settings import settings
 from shared.connectors.kafka import make_source_consumer
 from shared.schemas.event import REQUIRED_FIELDS, RawEvent
 
-DOCUMENTED_FIELDS = {
+KNOWN_FIELDS = {
     info.alias if info.alias else name
     for name, info in RawEvent.model_fields.items()
 }
@@ -92,7 +92,7 @@ def analyze(messages: list[dict]) -> None:
     print(f"\n  (*) required field")
 
     # Unknown fields
-    unknown = all_keys - DOCUMENTED_FIELDS
+    unknown = all_keys - KNOWN_FIELDS
     if unknown:
         print(f"\n  WARN: undocumented fields → {sorted(unknown)}")
         print("        Add to RawEvent model if legitimate.")

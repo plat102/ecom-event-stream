@@ -28,6 +28,7 @@ class SchemaValidator:
             if field not in payload:
                 return ValidationResult(
                     is_valid=False,
+                    payload=payload,
                     error_reason="missing_required_field",
                     error_field=field,
                 )

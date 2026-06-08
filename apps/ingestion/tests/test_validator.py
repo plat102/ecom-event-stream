@@ -41,6 +41,8 @@ def test_missing_id():
     assert result.is_valid is False
     assert result.error_reason == "missing_required_field"
     assert result.error_field == "id"
+    # parsed payload must be preserved — DLQ needs original_payload + metadata
+    assert result.payload == event
 
 
 def test_missing_local_time():

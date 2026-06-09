@@ -1,4 +1,6 @@
 from __future__ import annotations
+from urllib.parse import quote_plus
+
 from pymongo import MongoClient as PyMongoClient
 from pymongo.collection import Collection
 
@@ -22,5 +24,9 @@ class MongoDBClient:
 
 
 def make_mongo_client(settings) -> MongoDBClient:
-    """Factory uses settings.MONGO_URI and settings.MONGO_DB."""
-    return MongoDBClient(uri=settings.MONGO_URI, db_name=settings.MONGO_DB)
+    uri = (
+        f"mongodb://{quote_plus(settings.MONGO_USER)}"
+        f":{quote_plus(settings.MONGO_PASSWORD)}"
+        f"@{settings.MONGO_HOST}"
+    )
+    return MongoDBClient(uri=uri, db_name=settings.MONGO_DB)

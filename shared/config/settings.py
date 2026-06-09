@@ -30,7 +30,9 @@ class Settings(BaseSettings):
     SINK_KAFKA_SASL_PASSWORD: str = ""
 
     # MongoDB
-    MONGO_URI: str = ""
+    MONGO_HOST: str = "localhost:27017"
+    MONGO_USER: str = ""
+    MONGO_PASSWORD: str = ""
     MONGO_DB: str = ""
 
     # Tuning

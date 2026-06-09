@@ -12,6 +12,8 @@ import signal
 import time
 from datetime import datetime, timezone
 
+from pymongo.errors import BulkWriteError
+
 from shared.config.settings import settings
 from shared.connectors.kafka import make_sink_consumer
 from shared.connectors.mongodb import make_mongo_client
@@ -56,19 +58,30 @@ class MongoDBWriter:
     def __init__(self, collection) -> None:
         self._collection = collection
 
+    def _commit_all_partitions(self, consumer, msgs: list) -> None:
+        last_per_partition: dict[int, object] = {}
+        for msg in msgs:
+            last_per_partition[msg.partition()] = msg
+        for msg in last_per_partition.values():
+            consumer.commit(message=msg)
+
     def write(self, docs: list[dict], consumer, msgs: list) -> None:
         for attempt in range(MAX_RETRIES):
             try:
                 # ordered=False: one bad doc doesn't abort the rest of the batch
                 self._collection.insert_many(docs, ordered=False)
-                # commit per partition: a batch spans multiple partitions,
-                # committing only msgs[-1] would leave other partitions uncommitted
-                last_per_partition: dict[int, object] = {}
-                for msg in msgs:
-                    last_per_partition[msg.partition()] = msg
-                for msg in last_per_partition.values():
-                    consumer.commit(message=msg)
-                log.info(f"inserted {len(docs)} docs across {len(last_per_partition)} partition(s)")
+                self._commit_all_partitions(consumer, msgs)
+                log.info(f"inserted {len(docs)} docs")
+                return
+            except BulkWriteError as e:
+                # With ordered=False, non-duplicate docs were already inserted.
+                # Duplicate key means the doc is already in MongoDB - treat as success.
+                non_dup = [err for err in e.details.get("writeErrors", []) if err.get("code") != 11000]
+                if non_dup:
+                    raise
+                dup_count = len(e.details.get("writeErrors", []))
+                log.warning(f"skipped {dup_count} duplicate doc(s), committing offset")
+                self._commit_all_partitions(consumer, msgs)
                 return
             except Exception as e:
                 log.warning(f"write failed attempt={attempt + 1}: {e}")

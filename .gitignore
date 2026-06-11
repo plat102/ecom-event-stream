@@ -174,3 +174,5 @@ service-account*.json
 **/kafka_server_jaas.conf
 
 *.env
+
+*.excalidraw-*

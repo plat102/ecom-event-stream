@@ -15,9 +15,8 @@ Pipeline: external source Kafka (`product_view`) → validate → local Kafka (`
 - Bridge consumes events from the source cluster
 - Mongo sink consumes events from the local cluster & flows into MongoDB
 
-![live run](docs/attachments/ingest-running.gif)
+![live run](./attachments/ingest-running.gif)
 
----
 
 ### Verifying the data
 

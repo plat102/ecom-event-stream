@@ -73,6 +73,7 @@ class MongoDBWriter:
                 self._commit_all_partitions(consumer, msgs)
                 log.info(f"inserted {len(docs)} docs")
                 return
+
             except BulkWriteError as e:
                 # With ordered=False, non-duplicate docs were already inserted.
                 # Duplicate key means the doc is already in MongoDB - treat as success.
@@ -83,6 +84,7 @@ class MongoDBWriter:
                 log.warning(f"skipped {dup_count} duplicate doc(s), committing offset")
                 self._commit_all_partitions(consumer, msgs)
                 return
+
             except Exception as e:
                 log.warning(f"write failed attempt={attempt + 1}: {e}")
                 if attempt == MAX_RETRIES - 1:
@@ -101,6 +103,7 @@ class MongoSink:
 
     def run(self) -> None:
         self._consumer.subscribe(topics=[settings.SINK_KAFKA_TOPIC])
+        self._consumer.wait_for_assignment()
         log.info(f"mongo_sink started — consuming from {settings.SINK_KAFKA_TOPIC}")
 
         idle_polls = 0

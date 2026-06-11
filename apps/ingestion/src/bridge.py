@@ -36,7 +36,8 @@ class Bridge:
     def run(self) -> None:
         # Subscribe source consumer to SOURCE_KAFKA_TOPIC
         self._source_consumer.subscribe(topics=[settings.SOURCE_KAFKA_TOPIC])
-        log.info(f"bridge started — consuming from {settings.SOURCE_KAFKA_TOPIC}")
+        self._source_consumer.wait_for_assignment()
+        log.info(f"bridge started - consuming from {settings.SOURCE_KAFKA_TOPIC}")
 
         # Poll loop
         idle_polls = 0
@@ -44,10 +45,10 @@ class Bridge:
             # Pull message
             msg = self._source_consumer.poll()
             if msg is None:
-                # Heartbeat — confirms the loop is alive while waiting for events
+                # Confirms the loop is alive while waiting for events
                 idle_polls += 1
                 if idle_polls % 30 == 0:
-                    log.info(f"still running — idle for ~{idle_polls}s")
+                    log.info(f"still running - idle for ~{idle_polls}s")
                 continue
             if msg.error():
                 log.error(msg.error())
@@ -66,7 +67,7 @@ class Bridge:
     def _route(self, msg, result) -> None:
         """Send valid messages to sink topic, invalid ones to DLQ."""
         if result.is_valid:
-            # Forward original bytes as-is
+            # Forward original bytes
             self._sink_producer.produce(
                 topic=settings.SINK_KAFKA_TOPIC,
                 value=msg.value(),
@@ -74,7 +75,6 @@ class Bridge:
             self._sink_producer.flush()
         else:
             # Reuse parsed payload when available; fall back to raw bytes
-            # (json_parse_error never produces a payload)
             if result.payload is not None:
                 dlq_payload = result.payload
             else:

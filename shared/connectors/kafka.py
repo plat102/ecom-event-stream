@@ -1,3 +1,4 @@
+import time
 from typing import Self
 
 from confluent_kafka import Consumer, Producer
@@ -6,9 +7,28 @@ from confluent_kafka import Consumer, Producer
 class KafkaConsumerClient:
     def __init__(self, config: dict) -> None:
         self._consumer = Consumer(config)
+        self._assigned = False
 
     def subscribe(self, topics: list[str]) -> None:
-        self._consumer.subscribe(topics)
+        self._consumer.subscribe(topics, on_assign=self._on_assign)
+
+    def _on_assign(self, consumer, partitions) -> None:
+        self._assigned = True
+
+    def wait_for_assignment(self, timeout: float = 30.0) -> None:
+        """Block until the group coordinator assigns partitions, or raise.
+
+        Without this, a broken coordinator makes poll() return None forever,
+        looking identical to a healthy idle consumer.
+        """
+        deadline = time.monotonic() + timeout
+        while not self._assigned:
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"no partition assignment within {timeout}s "
+                    "— check broker connectivity / group coordinator"
+                )
+            self.poll(1.0)
 
     def poll(self, timeout: float = 1.0):
         return self._consumer.poll(timeout)

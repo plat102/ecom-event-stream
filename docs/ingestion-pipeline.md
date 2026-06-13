@@ -41,12 +41,29 @@ Use it to inspect messages on `user-events` / `user-events-dlq`, and check consu
 
 ### Install
 
+**0.** Symlink `.env` next to the compose files. Required for `${VAR}` interpolation (`CLUSTER_ID`, `MONGO_INITDB_ROOT_*`, AKHQ secrets)
+- without it, brokers fail to start and Mongo initializes with no root user:
+
 ```bash
-# 1. Start infrastructure (Kafka cluster + MongoDB)
+ln -s ../../.env infrastructure/docker/.env
+```
+
+**1.** Start infrastructure (Kafka cluster + MongoDB):
+
+```bash
 docker compose -f infrastructure/docker/docker-compose.kafka.yml \
                -f infrastructure/docker/docker-compose.db.yml up -d
+```
 
-# 2. Install deps & run unit tests
+**2.** Create Kafka topics with correct partition counts. Must run before any producer/consumer triggers auto-create, otherwise `user-events-dlq` would get 3 partitions instead of 1:
+
+```bash
+docker exec -i kafka-0 bash < infrastructure/docker/kafka/create_topics.sh
+```
+
+**3.** Install deps & run unit tests:
+
+```bash
 poetry install
 poetry run pytest apps/ingestion/ -v
 ```

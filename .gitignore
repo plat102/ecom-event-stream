@@ -176,3 +176,4 @@ service-account*.json
 *.env
 
 *.excalidraw-*
+.vscode

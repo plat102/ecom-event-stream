@@ -29,7 +29,7 @@ Use it to inspect messages on `user-events` / `user-events-dlq`, and check consu
 
 #### MongoDB - `raw_events`
 
-- Credentials: `infrastructure/docker/db.env`.
+- Credentials: `.env` (`MONGO_USER` / `MONGO_PASSWORD`).
 
 ![mongodb query](./attachments/mongodb.gif)
 

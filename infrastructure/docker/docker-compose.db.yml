@@ -1,3 +1,5 @@
+name: ecom-event-stream
+
 services:
   mongodb:
     image: mongo:7.0

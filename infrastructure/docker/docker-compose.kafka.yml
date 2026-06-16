@@ -1,3 +1,5 @@
+name: ecom-event-stream
+
 services:
   kafka-0:
     image: 'confluentinc/cp-kafka:7.6.1'

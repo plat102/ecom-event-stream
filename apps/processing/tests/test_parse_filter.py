@@ -4,7 +4,7 @@ Unit tests for RawParser + ValidationFilter.
 import json
 
 from filter import validate_events
-from parser import parse_raw
+from parse import parse_raw
 
 
 VALID_EVENT = {
@@ -80,6 +80,6 @@ def test_option_and_cart_products_kept_as_raw_string(spark):
     df = _to_df(spark, [json.dumps(event)])
     row = parse_raw(df).collect()[0]
 
-    # Not parsed into a struct/array yet — PayloadSplitter (P2.4) does that.
+    # Not parsed into a struct/array yet — a later step handles that.
     assert json.loads(row.option) == event["option"]
     assert json.loads(row.cart_products) == event["cart_products"]

@@ -1,4 +1,5 @@
-"""ValidationFilter: defensive NOT-NULL check — the P1 bridge already routes invalid records to DLQ."""
+"""Defensive NOT-NULL check — the bridge already routes invalid records to DLQ."""
+
 from pyspark.sql.functions import col
 
 from shared.schemas.event import REQUIRED_FIELDS

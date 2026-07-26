@@ -3,9 +3,9 @@ PySpark StructType for the raw Kafka event JSON — mirrors event.py's RawEvent 
 
 Fields marked "Any" in RawEvent (mixed bool/str/int in production data) are typed
 StringType here: from_json nulls non-string scalars but keeps nested JSON (option,
-cart_products) intact as text, which PayloadSplitter (P2.4) parses later.
+cart_products) intact as text, which a later parsing step handles.
 """
-from pyspark.sql.types import BooleanType, LongType, StringType, StructField, StructType
+from pyspark.sql.types import ArrayType, BooleanType, LongType, MapType, StringType, StructField, StructType
 
 EVENT_SCHEMA = StructType([
     # Always-present fields
@@ -40,13 +40,13 @@ EVENT_SCHEMA = StructType([
     StructField("cat_id", StringType(), True),  # Any
     StructField("currency", StringType(), True),
     StructField("key_search", StringType(), True),  # Any
-    StructField("option", StringType(), True),  # raw JSON (object or array), parsed in P2.4
+    StructField("option", StringType(), True),  # raw JSON (object or array), parsed downstream
     StructField("price", StringType(), True),
     StructField("product_id", StringType(), True),
     StructField("viewing_product_id", StringType(), True),
 
     # Cart / checkout
-    StructField("cart_products", StringType(), True),  # raw JSON array, parsed in P2.4
+    StructField("cart_products", StringType(), True),  # raw JSON array, parsed downstream
     StructField("is_paypal", StringType(), True),  # Any
     StructField("order_id", StringType(), True),  # Any: str, int, or float
 
@@ -57,3 +57,7 @@ EVENT_SCHEMA = StructType([
     StructField("recommendation_product_position", StringType(), True),  # Any: int or str
     StructField("show_recommendation", StringType(), True),
 ])
+
+# Shape of the `option`/`cart_products` raw JSON strings above, once actually parsed.
+OPTION_SCHEMA = ArrayType(MapType(StringType(), StringType()))
+CART_SCHEMA = ArrayType(MapType(StringType(), StringType()))

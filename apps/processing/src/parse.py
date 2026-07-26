@@ -1,4 +1,5 @@
-"""RawParser: parse Kafka message JSON into a typed DataFrame."""
+"""Parse Kafka message JSON into a typed DataFrame."""
+
 from pyspark.sql.functions import col, from_json
 
 from shared.schemas.event_spark import EVENT_SCHEMA

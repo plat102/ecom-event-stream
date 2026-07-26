@@ -62,6 +62,9 @@ docs/_build/
 .pybuilder/
 target/
 
+# Spark streaming checkpoint (local dev)
+/checkpoints/
+
 # Jupyter Notebook
 .ipynb_checkpoints
 

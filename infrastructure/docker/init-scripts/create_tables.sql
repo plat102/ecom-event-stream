@@ -75,13 +75,26 @@ VALUES ('unknown', 'unknown', 'unknown', FALSE);
 --    dynamically from the stream (the other three are seeded once above).
 -- ═══════════════════════════════════════════════════════════════════════
 CREATE TABLE dim_product (
-    product_key    SERIAL       PRIMARY KEY,
-    product_id     VARCHAR(50)  NOT NULL UNIQUE,
-    first_seen_at  TIMESTAMPTZ  NOT NULL,
-    last_seen_at   TIMESTAMPTZ  NOT NULL,
-    product_name   VARCHAR(500),
-    category_id    VARCHAR(50),
-    category_name  VARCHAR(200)
+    product_key      SERIAL        PRIMARY KEY,
+    product_id       VARCHAR(50)   NOT NULL UNIQUE,
+    -- NULL means "known from the catalog, never actually seen in an event" —
+    -- these two columns only get a value from a real stream event (see upsert.py).
+    first_seen_at    TIMESTAMPTZ,
+    last_seen_at     TIMESTAMPTZ,
+    product_name     VARCHAR(500),
+    category_id      VARCHAR(50),
+    category_name    VARCHAR(200),
+    -- Catalog enrichment (backfilled from a scraped export, not from the event stream)
+    url              VARCHAR(500),
+    sku              VARCHAR(50),
+    product_type     VARCHAR(20),
+    collection_name  VARCHAR(50),
+    gender           VARCHAR(20),
+    currency_code    VARCHAR(10),
+    price            NUMERIC(15, 2),
+    min_price        NUMERIC(15, 2),
+    max_price        NUMERIC(15, 2),
+    gold_weight      NUMERIC(10, 4)
 );
 CREATE INDEX ON dim_product (product_id);
 

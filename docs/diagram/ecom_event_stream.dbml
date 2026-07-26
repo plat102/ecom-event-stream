@@ -28,10 +28,23 @@ Table dim_location {
 }
 
 Table dim_product {
-  product_key    SERIAL       [pk]
-  product_id     VARCHAR(50)  [unique]
-  first_seen_at  TIMESTAMPTZ
-  last_seen_at   TIMESTAMPTZ
+  product_key      SERIAL       [pk]
+  product_id       VARCHAR(50)  [unique]
+  first_seen_at    TIMESTAMPTZ
+  last_seen_at     TIMESTAMPTZ
+  product_name     VARCHAR(500)
+  category_id      VARCHAR(50)
+  category_name    VARCHAR(200)
+  url              VARCHAR(500)
+  sku              VARCHAR(50)
+  product_type     VARCHAR(20)
+  collection_name  VARCHAR(50)
+  gender           VARCHAR(20)
+  currency_code    VARCHAR(10)
+  price            "NUMERIC(15,2)"
+  min_price        "NUMERIC(15,2)"
+  max_price        "NUMERIC(15,2)"
+  gold_weight      "NUMERIC(10,4)"
 }
 
 Table dim_device {

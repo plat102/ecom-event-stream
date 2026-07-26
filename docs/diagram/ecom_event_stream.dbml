@@ -1,0 +1,87 @@
+Table dim_date {
+  date_key      INTEGER      [pk]
+  full_date     DATE         [unique]
+  year          SMALLINT
+  quarter       SMALLINT
+  month         SMALLINT
+  week_of_year  SMALLINT
+  day_of_week   SMALLINT
+  is_weekend    BOOLEAN
+}
+
+Table dim_site {
+  site_key        SERIAL       [pk]
+  country_domain  VARCHAR(20)  [unique]
+  country_iso     VARCHAR(3)
+  country_name    VARCHAR(100)
+  continent       VARCHAR(50)
+  timezone        VARCHAR(50)
+}
+
+Table dim_location {
+  location_key            SERIAL       [pk]
+  country_name            VARCHAR(100)
+  region_name             VARCHAR(100)
+  city_name               VARCHAR(100)
+  geo_completeness_level  SMALLINT
+  has_geo_data            BOOLEAN
+}
+
+Table dim_product {
+  product_key    SERIAL       [pk]
+  product_id     VARCHAR(50)  [unique]
+  first_seen_at  TIMESTAMPTZ
+  last_seen_at   TIMESTAMPTZ
+}
+
+Table dim_device {
+  device_key       SERIAL       [pk]
+  browser          VARCHAR(50)
+  os               VARCHAR(50)
+  device_category  VARCHAR(20)
+  is_mobile        BOOLEAN
+}
+
+Table fact_event {
+  event_key         BIGSERIAL
+  event_id          VARCHAR(50)
+
+  event_type        VARCHAR(50)
+
+  date_key          INTEGER
+  site_key          INTEGER
+  location_key      INTEGER
+  product_key       INTEGER
+  device_key        INTEGER
+
+  report_date       DATE
+  hour              SMALLINT
+  event_timestamp   TIMESTAMPTZ
+
+  store_id          VARCHAR(50)
+  session_id        VARCHAR(50)
+  device_id         VARCHAR(100)
+  user_id_db        VARCHAR(100)
+  email_hash        VARCHAR(64)
+  ip                VARCHAR(45)
+
+  current_url       TEXT
+  referrer_url      TEXT
+  user_agent        TEXT
+  resolution        VARCHAR(20)
+
+  utm_source        VARCHAR(100)
+  utm_medium        VARCHAR(100)
+
+  payload           JSONB
+
+  event_count       SMALLINT
+
+  ingested_at       TIMESTAMPTZ
+}
+
+Ref: fact_event.date_key       > dim_date.date_key
+Ref: fact_event.site_key       > dim_site.site_key
+Ref: fact_event.location_key   > dim_location.location_key
+Ref: fact_event.product_key    > dim_product.product_key
+Ref: fact_event.device_key     > dim_device.device_key

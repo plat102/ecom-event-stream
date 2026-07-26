@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     MONGO_PASSWORD: str = ""
     MONGO_DB: str = ""
 
+    # PostgreSQL (analytics warehouse)
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_DB: str = ""
+    POSTGRES_USER: str = ""
+    POSTGRES_PASSWORD: str = ""
+
     # Tuning
     BATCH_SIZE: int = 500
     FLUSH_INTERVAL_SECONDS: float = 2.0

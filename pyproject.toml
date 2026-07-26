@@ -13,6 +13,7 @@ pytest = "^9.0.3"
 pydantic-settings = "^2.14.1"
 loguru = "^0.7.3"
 pymongo = "^4.17.0"
+pyspark = {version = "^3.5.1", extras = ["sql"]}
 
 
 [tool.pytest.ini_options]

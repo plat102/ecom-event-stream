@@ -1,6 +1,5 @@
-"""Streamlit dashboard: Overview (all data), One day (the six reports), Live (auto-refreshing).
+"""Streamlit dashboard: One day (the six reports), Overview (all data), Live (auto-refreshing).
 
-Reports read the views; Overview and Live read fact_event, which covers every event type.
 Aggregation stays in SQL — a wrong number means a wrong view, not a wrong chart.
 
 Usage:
@@ -29,7 +28,7 @@ def query(sql: str, params: tuple | None = None) -> pd.DataFrame:
 
 
 def ranking(df: pd.DataFrame, label: str, value: str = "view_count", height: int = 320) -> None:
-    """Horizontal bar sorted by value. Altair because st.bar_chart sorts alphabetically."""
+    """Altair, not st.bar_chart, which sorts alphabetically."""
     if df.empty:
         st.info("No data.")
         return
@@ -47,8 +46,7 @@ def ranking(df: pd.DataFrame, label: str, value: str = "view_count", height: int
 
 
 def hourly(df: pd.DataFrame, value: str = "view_count") -> None:
-    """Full 0-23 day so quiet hours read as zero. Expect few bars: one report_date only
-    spans 30-90 minutes of event time."""
+    """Pinned to 0-23 so quiet hours read as zero."""
     if df.empty:
         st.info("No data.")
         return
@@ -71,9 +69,16 @@ def hourly(df: pd.DataFrame, value: str = "view_count") -> None:
     st.altair_chart(chart)
 
 
+def fold_tail(df: pd.DataFrame, column: str, value: str, keep: int = 6) -> pd.DataFrame:
+    """Everything past the top `keep` becomes one bucket — 40 browsers stacked is unreadable.
+    Parenthesised label because `os` already has a real value spelled "Other"."""
+    top = df.groupby(column)[value].sum().nlargest(keep).index
+    folded = df.assign(**{column: df[column].where(df[column].isin(top), "(other)")})
+    return folded.groupby(["hour", column], as_index=False)[value].sum()
+
+
 def stacked_hourly(df: pd.DataFrame, color: str, value: str = "events") -> None:
-    """Hour-of-day stacked bar. Only for low-cardinality splits — stacking 12 browsers is
-    unreadable. x pinned to 0-23 so missing hours show as gaps."""
+    """x pinned to 0-23 so missing hours show as gaps."""
     if df.empty:
         st.info("No data.")
         return
@@ -97,7 +102,8 @@ if run("SELECT COUNT(*) AS n FROM fact_event").at[0, "n"] == 0:
     st.warning("fact_event is empty — start the ingestion bridge and the streaming job first.")
     st.stop()
 
-tab_overview, tab_day, tab_live = st.tabs(["Overview", "One day", "Live"])
+# Tab order comes from this tuple, not from the section order below.
+tab_day, tab_overview, tab_live = st.tabs(["One day", "Overview", "Live"])
 
 # ══════════════════════════════════════════════════════════════════════════
 # Overview — everything, no date filter
@@ -215,7 +221,6 @@ with tab_day:
     b.metric("Distinct products", f"{day_totals.at[0, 'products']:,}")
     c.metric("Distinct devices", f"{day_totals.at[0, 'visitors']:,}")
 
-    # What was viewed, and from which storefront
     left, right = st.columns(2)
     with left:
         st.subheader(f"Top {top_n} products")
@@ -236,7 +241,6 @@ with tab_day:
         countries["label"] = countries["country_name"].fillna(countries["country_domain"])
         ranking(countries.head(top_n), "label")
 
-    # Where the traffic came from, and which store served it
     left, right = st.columns(2)
     with left:
         st.subheader(f"Top {top_n} referrers")
@@ -261,19 +265,30 @@ with tab_day:
             height=320,
         )
 
-    # When the views happened
+    # Two scopes because R5 wants per-product hours and R6 wants browser × os hours.
     st.subheader("Views by hour")
     scope = st.radio(
         "Scope", ["All products", "One product"], horizontal=True, label_visibility="collapsed"
     )
     if scope == "All products":
-        hourly(
-            query(
-                "SELECT hour, SUM(view_count)::bigint AS view_count FROM v_product_hourly "
-                "WHERE report_date = %s GROUP BY 1 ORDER BY 1",
-                (report_date,),
+        # Fixed mapping — this reaches SQL as an identifier.
+        split_by = {"Category": "device_category", "Browser": "browser", "OS": "os"}[
+            st.radio(
+                "Split by",
+                ["Category", "Browser", "OS"],
+                horizontal=True,
+                help="Category is the readable default — 4 values against 40 browsers. "
+                "Browser and OS are what R6 asks for.",
             )
+        ]
+        # COALESCE, not NULL: no dim_device match is "unknown", not fold_tail's "(other)".
+        by_device = query(
+            f"SELECT hour, COALESCE({split_by}, 'unknown') AS {split_by}, "
+            "SUM(view_count)::bigint AS view_count "
+            "FROM v_device_hourly WHERE report_date = %s GROUP BY 1, 2 ORDER BY 1",
+            (report_date,),
         )
+        stacked_hourly(fold_tail(by_device, split_by, "view_count"), split_by, "view_count")
     elif products.empty:
         st.info("No products viewed on this date.")
     else:
@@ -291,7 +306,7 @@ with tab_day:
             )
         )
 
-    # Two flat charts — a stacked browser-by-hour bar is unreadable.
+    # Day totals — the hourly split lives in the chart above.
     st.subheader("Devices")
     devices = query(
         "SELECT browser, os, device_category, SUM(view_count)::bigint AS view_count "

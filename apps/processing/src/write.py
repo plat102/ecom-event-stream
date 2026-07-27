@@ -13,6 +13,7 @@ def write_fact_event(enriched_batch):
         "event_type",
         "date_key",
         "site_key",
+        "location_key",
         "product_key",
         "device_key",
         col("id").alias("event_id"),

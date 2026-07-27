@@ -58,7 +58,7 @@ def main():
     spark = SparkSession.builder.appName("ecom-stream-processor").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 
-    dim_date, dim_site, dim_device = load_static_dims(spark)
+    dims = load_static_dims(spark)
 
     raw = (
         kafka_source_options(spark.readStream, settings, settings.SINK_KAFKA_TOPIC)
@@ -70,7 +70,7 @@ def main():
     valid = validate_events(parsed)
     enriched = enrich(valid)
     split = split_payload(enriched)
-    lookup_df = lookup_static_dims(split, dim_date, dim_site, dim_device)
+    lookup_df = lookup_static_dims(split, dims)
 
     query = (
         lookup_df.writeStream.foreachBatch(build_process_batch(spark))

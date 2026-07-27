@@ -35,9 +35,7 @@ CHECKPOINT_LOCATION = (
 
 def build_process_batch(spark):
     def process_batch(batch_df, batch_id):
-        # Dedup by id within the batch — the source produces at-least-once, so the same
-        # event can legitimately appear twice; a duplicate here would fail the whole
-        # batch on fact_event's UNIQUE(event_id) constraint otherwise.
+        # Dedup by id within the batch
         batch_df = batch_df.dropDuplicates(["id"]).cache()
         row_count = batch_df.count()
 

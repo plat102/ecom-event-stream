@@ -1,13 +1,14 @@
-"""Append the enriched batch to fact_event via JDBC."""
+"""Insert the enriched batch into fact_event, skipping events already written."""
+from types import SimpleNamespace
+
 from pyspark.sql.functions import col, lit
 
 from shared.config.settings import settings
-from shared.connectors.postgres import jdbc_properties, jdbc_url
+from shared.connectors.postgres import PostgresClient
 
 
-def write_fact_event(enriched_batch):
-    """Write mode is append, not overwrite — idempotency comes from Spark's checkpoint plus
-    fact_event's UNIQUE(event_id) constraint, not from truncating and reloading.
+def write_fact_event(enriched_batch) -> int:
+    """Insert with ON CONFLICT (event_id) DO NOTHING, one connection per Spark partition.
     """
     fact_df = enriched_batch.select(
         "event_type",
@@ -33,18 +34,37 @@ def write_fact_event(enriched_batch):
         "resolution",
         "utm_source",
         "utm_medium",
-        col("payload").cast("string"),  # PostgreSQL casts this to jsonb on insert
+        col("payload").cast("string"),  # an untyped literal, so Postgres reads it as jsonb
         "kafka_partition",
         "kafka_offset",
     )
 
-    fact_df.write.jdbc(
-        url=jdbc_url(settings),
-        table="fact_event",
-        mode="append",
-        properties={
-            **jdbc_properties(settings),
-            "batchsize": "5000",
-            "reWriteBatchedInserts": "true",  # PostgreSQL JDBC driver batch-insert optimization
-        },
+    # Built from fact_df.columns
+    insert_sql = f"""
+        INSERT INTO fact_event ({", ".join(fact_df.columns)})
+        VALUES %s
+        ON CONFLICT (event_id) DO NOTHING
+        RETURNING 1
+    """
+
+    # Plain values, not the pydantic settings object — this crosses into the executors
+    conn = SimpleNamespace(
+        POSTGRES_HOST=settings.POSTGRES_HOST,
+        POSTGRES_PORT=settings.POSTGRES_PORT,
+        POSTGRES_DB=settings.POSTGRES_DB,
+        POSTGRES_USER=settings.POSTGRES_USER,
+        POSTGRES_PASSWORD=settings.POSTGRES_PASSWORD,
     )
+
+    def insert_partition(rows):
+        values = [tuple(row) for row in rows]
+        if not values:
+            return iter([0])  # no connection for an empty partition
+        with PostgresClient(conn) as pg:
+            # fetch=True is required for an accurate count: execute_values pages internally,
+            # so cursor.rowcount would only reflect the last page. RETURNING 1 emits a row
+            # per insert and nothing for a skipped conflict.
+            inserted = pg.execute_values(insert_sql, values, fetch=True)
+        return iter([len(inserted)])
+
+    return sum(fact_df.rdd.mapPartitions(insert_partition).collect())

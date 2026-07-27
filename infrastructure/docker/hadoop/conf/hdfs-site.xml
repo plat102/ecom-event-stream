@@ -1,0 +1,10 @@
+<!--
+  Client-side Hadoop config for submitting to YARN. See core-site.xml.
+
+  Replication is a per-write client property: the cluster has a single DataNode, so leaving the
+  default of 3 makes every staged file permanently under-replicated.
+-->
+<configuration>
+<property><name>dfs.namenode.rpc-address</name><value>namenode:8020</value></property>
+<property><name>dfs.replication</name><value>1</value></property>
+</configuration>

@@ -1,0 +1,14 @@
+<!--
+  Client-side Hadoop config for submitting to YARN. Mounted read-only into the driver container
+  as HADOOP_CONF_DIR; it configures the *client*, it does not configure the cluster. Values must
+  stay in sync with the cluster these hostnames point at.
+
+  fs.defaultFS is what makes HDFS the staging area Spark uploads JARs, py-files zips and
+  __spark_conf__.zip to, and what a relative checkpoint path resolves against.
+
+  (No double hyphens below: they are illegal inside an XML comment and Hadoop hard-fails on it.)
+-->
+<configuration>
+<property><name>fs.defaultFS</name><value>hdfs://namenode</value></property>
+<property><name>fs.default.name</name><value>hdfs://namenode</value></property>
+</configuration>

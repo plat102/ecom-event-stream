@@ -1,0 +1,9 @@
+<!--
+  Client-side Hadoop config for submitting to YARN. See core-site.xml.
+
+  Only the ResourceManager hostname matters to the client: leaving it unset defaults to 0.0.0.0,
+  which the client resolves as localhost and then fails to reach the cluster.
+-->
+<configuration>
+<property><name>yarn.resourcemanager.hostname</name><value>resourcemanager</value></property>
+</configuration>

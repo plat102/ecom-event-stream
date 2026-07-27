@@ -1,6 +1,5 @@
--- Analytics warehouse schema: fact_event (append-only event log) + 4 dimensions
--- (dim_date, dim_site, dim_device, dim_product). fact_event is a plain table for
--- now — no partitioning, no geo dimension, no reporting views yet.
+-- Analytics warehouse: fact_event (append-only) + 5 dimensions + the ip_locations lookup.
+-- fact_event is a plain table for now — no partitioning. Views live in create_views.sql.
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- 1. dim_date — calendar spine (2024-01-01 .. 2030-12-31, static SCD1)
@@ -50,9 +49,82 @@ CREATE TABLE dim_site (
     UNIQUE (country_domain)
 );
 
--- Required: fact_event.country_domain='unknown' must match this row so site_key is never NULL.
-INSERT INTO dim_site (country_domain, country_name, is_unknown, timezone)
-VALUES ('unknown', 'Unknown', TRUE, 'UTC');
+-- country_name is spelled the way IP2Location spells it ("Viet Nam", "Korea, Republic of") —
+-- the views compare this column against dim_location.country_name directly, so a prettier
+-- spelling silently turns every visit from that country into a false cross-border hit.
+-- 'com'/'local'/'unknown' are not countries: NULL name, so the comparison yields NULL.
+INSERT INTO dim_site (country_domain, country_iso, country_name, continent, is_unknown) VALUES
+    ('unknown', NULL, NULL,                              NULL,            TRUE),
+    ('com',     NULL, NULL,                              NULL,            TRUE),
+    ('local',   NULL, NULL,                              NULL,            TRUE),
+    ('ae', 'AE', 'United Arab Emirates',                 'Asia',          FALSE),
+    ('al', 'AL', 'Albania',                              'Europe',        FALSE),
+    ('ar', 'AR', 'Argentina',                            'South America', FALSE),
+    ('at', 'AT', 'Austria',                              'Europe',        FALSE),
+    ('au', 'AU', 'Australia',                            'Oceania',       FALSE),
+    ('az', 'AZ', 'Azerbaijan',                           'Asia',          FALSE),
+    ('be', 'BE', 'Belgium',                              'Europe',        FALSE),
+    ('bg', 'BG', 'Bulgaria',                             'Europe',        FALSE),
+    ('bo', 'BO', 'Bolivia, Plurinational State of',      'South America', FALSE),
+    ('br', 'BR', 'Brazil',                               'South America', FALSE),
+    ('ca', 'CA', 'Canada',                               'North America', FALSE),
+    ('ch', 'CH', 'Switzerland',                          'Europe',        FALSE),
+    ('cl', 'CL', 'Chile',                                'South America', FALSE),
+    ('cn', 'CN', 'China',                                'Asia',          FALSE),
+    ('co', 'CO', 'Colombia',                             'South America', FALSE),
+    ('cr', 'CR', 'Costa Rica',                           'North America', FALSE),
+    ('cz', 'CZ', 'Czech Republic',                       'Europe',        FALSE),
+    ('de', 'DE', 'Germany',                              'Europe',        FALSE),
+    ('dk', 'DK', 'Denmark',                              'Europe',        FALSE),
+    ('do', 'DO', 'Dominican Republic',                   'North America', FALSE),
+    ('ec', 'EC', 'Ecuador',                              'South America', FALSE),
+    ('ee', 'EE', 'Estonia',                              'Europe',        FALSE),
+    ('es', 'ES', 'Spain',                                'Europe',        FALSE),
+    ('fi', 'FI', 'Finland',                              'Europe',        FALSE),
+    ('fr', 'FR', 'France',                               'Europe',        FALSE),
+    ('gt', 'GT', 'Guatemala',                            'North America', FALSE),
+    ('hk', 'HK', 'Hong Kong',                            'Asia',          FALSE),
+    ('hn', 'HN', 'Honduras',                             'North America', FALSE),
+    ('hr', 'HR', 'Croatia',                              'Europe',        FALSE),
+    ('hu', 'HU', 'Hungary',                              'Europe',        FALSE),
+    ('ie', 'IE', 'Ireland',                              'Europe',        FALSE),
+    ('in', 'IN', 'India',                                'Asia',          FALSE),
+    ('is', 'IS', 'Iceland',                              'Europe',        FALSE),
+    ('it', 'IT', 'Italy',                                'Europe',        FALSE),
+    ('jp', 'JP', 'Japan',                                'Asia',          FALSE),
+    ('kr', 'KR', 'Korea, Republic of',                   'Asia',          FALSE),
+    ('lt', 'LT', 'Lithuania',                            'Europe',        FALSE),
+    ('lv', 'LV', 'Latvia',                               'Europe',        FALSE),
+    ('md', 'MD', 'Moldova, Republic of',                 'Europe',        FALSE),
+    ('mt', 'MT', 'Malta',                                'Europe',        FALSE),
+    ('mx', 'MX', 'Mexico',                               'North America', FALSE),
+    ('nl', 'NL', 'Netherlands',                          'Europe',        FALSE),
+    ('no', 'NO', 'Norway',                               'Europe',        FALSE),
+    ('nz', 'NZ', 'New Zealand',                          'Oceania',       FALSE),
+    ('pe', 'PE', 'Peru',                                 'South America', FALSE),
+    ('ph', 'PH', 'Philippines',                          'Asia',          FALSE),
+    ('pl', 'PL', 'Poland',                               'Europe',        FALSE),
+    ('pr', 'PR', 'Puerto Rico',                          'North America', FALSE),
+    ('pt', 'PT', 'Portugal',                             'Europe',        FALSE),
+    ('ro', 'RO', 'Romania',                              'Europe',        FALSE),
+    ('rs', 'RS', 'Serbia',                               'Europe',        FALSE),
+    ('se', 'SE', 'Sweden',                               'Europe',        FALSE),
+    ('sg', 'SG', 'Singapore',                            'Asia',          FALSE),
+    ('si', 'SI', 'Slovenia',                             'Europe',        FALSE),
+    ('sk', 'SK', 'Slovakia',                             'Europe',        FALSE),
+    ('sv', 'SV', 'El Salvador',                          'North America', FALSE),
+    ('th', 'TH', 'Thailand',                             'Asia',          FALSE),
+    ('tr', 'TR', 'Turkey',                               'Asia',          FALSE),
+    ('ua', 'UA', 'Ukraine',                              'Europe',        FALSE),
+    ('uk', 'GB', 'United Kingdom',                       'Europe',        FALSE),
+    ('uy', 'UY', 'Uruguay',                              'South America', FALSE),
+    ('vn', 'VN', 'Viet Nam',                             'Asia',          FALSE),
+    ('za', 'ZA', 'South Africa',                         'Africa',        FALSE)
+ON CONFLICT (country_domain) DO UPDATE SET
+    country_iso  = EXCLUDED.country_iso,
+    country_name = EXCLUDED.country_name,
+    continent    = EXCLUDED.continent,
+    is_unknown   = EXCLUDED.is_unknown;
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- 3. dim_device — junk dimension (browser × os × device_category)
@@ -99,7 +171,35 @@ CREATE TABLE dim_product (
 CREATE INDEX ON dim_product (product_id);
 
 -- ═══════════════════════════════════════════════════════════════════════
--- 5. fact_event — plain table for now (no partitioning). PK is just event_key;
+-- 5. ip_locations — resolution lookup, NOT a dimension: the stream joins through it
+--    to reach dim_location. Populated offline by scripts/load_ip_locations.py.
+-- ═══════════════════════════════════════════════════════════════════════
+CREATE TABLE ip_locations (
+    ip       VARCHAR(45)  PRIMARY KEY,
+    country  VARCHAR(100),
+    region   VARCHAR(100),
+    city     VARCHAR(100)
+);
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 6. dim_location — real geography from the visitor's IP, unlike dim_site's locale
+--    from the URL. Grain is the deduped (country, region, city) combination.
+-- ═══════════════════════════════════════════════════════════════════════
+CREATE TABLE dim_location (
+    location_key           SERIAL       PRIMARY KEY,
+    country_name           VARCHAR(100),
+    region_name            VARCHAR(100),
+    city_name              VARCHAR(100),
+    geo_completeness_level SMALLINT,                -- 1=country, 2=+region, 3=full
+    has_geo_data           BOOLEAN      NOT NULL,   -- FALSE for the all-NULL combination
+    -- NULLS NOT DISTINCT is required: partial geo like (Chile, NULL, NULL) would
+    -- otherwise never conflict and the loader would re-insert it every run.
+    UNIQUE NULLS NOT DISTINCT (country_name, region_name, city_name)
+);
+CREATE INDEX ON dim_location (country_name, city_name);
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 7. fact_event — plain table for now (no partitioning). PK is just event_key;
 --    idempotency relies on UNIQUE(event_id). Partitioning by report_date later
 --    would need report_date added to the PK/unique constraint (Postgres requires
 --    the partition key in both).
@@ -114,6 +214,7 @@ CREATE TABLE fact_event (
     -- FK dims, no REFERENCES declared — avoids FK-check overhead on high-throughput appends.
     date_key             INTEGER       NOT NULL,
     site_key             INTEGER,
+    location_key         INTEGER,      -- NULL when the IP resolved to nothing at all
     product_key          INTEGER,
     device_key           INTEGER,
 
@@ -168,6 +269,7 @@ CREATE TABLE fact_event (
 CREATE INDEX ON fact_event (event_type, report_date);
 CREATE INDEX ON fact_event (product_key, report_date) WHERE product_key IS NOT NULL;
 CREATE INDEX ON fact_event (site_key, report_date);
+CREATE INDEX ON fact_event (location_key, report_date) WHERE location_key IS NOT NULL;
 CREATE INDEX ON fact_event (report_date, hour);
 CREATE INDEX ON fact_event (device_id, report_date);
 CREATE INDEX ON fact_event (order_id) WHERE order_id IS NOT NULL;

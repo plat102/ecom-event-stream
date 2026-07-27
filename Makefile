@@ -9,7 +9,9 @@ HADOOP_CONTAINERS := hadoop-namenode-1 hadoop-datanode1-1 \
 # which would corrupt the comma-separated coordinate list.
 SPARK_PACKAGES := org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.9,org.postgresql:postgresql:42.7.3
 
-.PHONY: up down ps logs topics test psql \
+PSQL := docker exec -i postgresql psql -U $${POSTGRES_USER:-ecom} -d $${POSTGRES_DB:-ecom_analytics}
+
+.PHONY: up down ps logs topics test psql views \
 	yarn-up yarn-down yarn-ps hdfs-init run-local run-yarn smoke-yarn
 
 up: ## Start infrastructure (Kafka cluster + MongoDB + PostgreSQL)
@@ -32,6 +34,9 @@ test: ## Run all unit tests (ingestion + processing)
 
 psql: ## Open psql shell into the analytics warehouse
 	docker exec -it postgresql psql -U $${POSTGRES_USER:-ecom} -d $${POSTGRES_DB:-ecom_analytics}
+
+views: ## (Re)create the reporting views — safe to re-run, it drops them first
+	$(PSQL) < infrastructure/docker/init-scripts/create_views.sql
 
 yarn-up: ## Start the existing Hadoop/YARN cluster containers
 	docker start $(HADOOP_CONTAINERS)

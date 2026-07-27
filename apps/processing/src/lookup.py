@@ -5,7 +5,7 @@ from pyspark.sql.functions import broadcast, col
 from shared.config.settings import settings
 from shared.connectors.postgres import jdbc_properties, jdbc_url
 
-STATIC_TABLES = ("dim_date", "dim_site", "dim_device", "ip_locations", "dim_location")
+STATIC_TABLES = ("dim_date", "dim_site", "ip_locations", "dim_location")
 
 
 def load_static_dims(spark):
@@ -48,8 +48,8 @@ def _lookup_location(df, ip_locations, dim_location):
 def lookup_static_dims(df, dims):
     """Left joins — a miss leaves the surrogate key NULL rather than dropping the event.
 
-    `dim_site`/`dim_device` must have an "unknown" seed row so events with
-    country_domain/browser/os/device_category = "unknown" still resolve a key.
+    `dim_site` must have an "unknown" seed row so events with country_domain = "unknown"
+    still resolve a key.
     """
     dim_date = dims["dim_date"]
     joined = (
@@ -61,11 +61,6 @@ def lookup_static_dims(df, dims):
         .join(
             broadcast(dims["dim_site"].select("country_domain", "site_key")),
             on="country_domain",
-            how="left",
-        )
-        .join(
-            broadcast(dims["dim_device"].select("browser", "os", "device_category", "device_key")),
-            on=["browser", "os", "device_category"],
             how="left",
         )
     )

@@ -47,20 +47,6 @@ def _dim_site(spark):
     return spark.createDataFrame([("cl", 1), ("unknown", 99)], schema)
 
 
-def _dim_device(spark):
-    # "unknown"/"unknown"/"unknown" mirrors the seed row required in the DDL migration script
-    schema = StructType([
-        StructField("browser", StringType()),
-        StructField("os", StringType()),
-        StructField("device_category", StringType()),
-        StructField("device_key", IntegerType()),
-    ])
-    return spark.createDataFrame(
-        [("Chrome", "Windows", "Desktop", 1), ("unknown", "unknown", "unknown", 99)],
-        schema,
-    )
-
-
 def _ip_locations(spark):
     schema = StructType([
         StructField("ip", StringType()),
@@ -100,7 +86,6 @@ def _lookup(spark, row):
     dims = {
         "dim_date": _dim_date(spark),
         "dim_site": _dim_site(spark),
-        "dim_device": _dim_device(spark),
         "ip_locations": _ip_locations(spark),
         "dim_location": _dim_location(spark),
     }
@@ -124,16 +109,6 @@ def test_site_key_resolved(spark):
 
 def test_unknown_country_domain_resolves_seeded_unknown_row(spark):
     assert _lookup(spark, _with(country_domain="unknown")).site_key == 99
-
-
-def test_device_key_resolved(spark):
-    assert _lookup(spark, DEFAULT_EVENT).device_key == 1
-
-
-def test_unknown_device_combo_resolves_seeded_unknown_row(spark):
-    result = _lookup(spark, _with(browser="unknown", os="unknown", device_category="unknown"))
-
-    assert result.device_key == 99
 
 
 def test_no_match_leaves_key_null_instead_of_dropping_row(spark):

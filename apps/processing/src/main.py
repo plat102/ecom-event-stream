@@ -23,7 +23,7 @@ from shared.config.settings import settings
 from shared.connectors.spark_kafka import kafka_source_options
 from shared.schemas.event_type import KNOWN_EVENT_TYPES
 from shared.utils.logger import get_logger
-from upsert import relookup_dynamic_dims, upsert_dim_product
+from upsert import relookup_dynamic_dims, upsert_dim_device, upsert_dim_product
 from write import write_fact_event
 
 log = get_logger("main")
@@ -43,6 +43,7 @@ def build_process_batch(spark):
         valid_df = batch_df.filter(col("event_type").isin(KNOWN_EVENT_TYPES))
 
         upsert_dim_product(valid_df)
+        upsert_dim_device(valid_df)
         enriched_batch = relookup_dynamic_dims(valid_df, spark)
         write_fact_event(enriched_batch)
 

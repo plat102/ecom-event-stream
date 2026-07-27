@@ -1,6 +1,7 @@
 COMPOSE := docker compose --env-file .env \
 	-f infrastructure/docker/docker-compose.kafka.yml \
-	-f infrastructure/docker/docker-compose.db.yml
+	-f infrastructure/docker/docker-compose.db.yml \
+	-f infrastructure/docker/docker-compose.dashboard.yml
 
 HADOOP_CONTAINERS := hadoop-namenode-1 hadoop-datanode1-1 \
 	hadoop-resourcemanager-1 hadoop-nodemanager1-1

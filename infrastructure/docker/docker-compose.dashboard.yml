@@ -1,0 +1,28 @@
+name: ecom-event-stream
+
+services:
+  dashboard:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/dashboard/Dockerfile
+    container_name: dashboard
+    hostname: dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      # Overrides .env file
+      POSTGRES_HOST: postgresql
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - streaming-network
+
+networks:
+  streaming-network:
+    external: true

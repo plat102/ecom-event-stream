@@ -31,6 +31,15 @@ class PostgresClient:
             cursor.execute(sql, params)
             return cursor.fetchone()
 
+    def fetch_all(
+        self, sql: str, params: tuple | None = None
+    ) -> tuple[list[tuple], list[str]]:
+        """Returns (rows, column_names) — enough to build a DataFrame without SQLAlchemy,
+        which pandas would otherwise want for read_sql."""
+        with self._conn.cursor() as cursor:
+            cursor.execute(sql, params)
+            return cursor.fetchall(), [c.name for c in cursor.description]
+
     def execute_values(self, sql: str, rows: list[tuple], fetch: bool = False) -> list | None:
         """`sql` must contain one `%s` for the VALUES list, e.g. `... FROM (VALUES %s) AS v(...)`.
 

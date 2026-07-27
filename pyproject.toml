@@ -16,6 +16,8 @@ pymongo = "^4.17.0"
 pyspark = {version = "^3.5.1", extras = ["sql"]}
 user-agents = "^2.2.0"
 psycopg2-binary = "^2.9.12"
+ip2location = "^8.11.0"
+streamlit = "^1.60.0"
 
 
 [tool.pytest.ini_options]

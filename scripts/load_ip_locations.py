@@ -38,11 +38,11 @@ REBUILD_DIM_LOCATION_SQL = """
         region,
         city,
         CASE
-            WHEN city IS NOT NULL THEN 3
-            WHEN region IS NOT NULL THEN 2
+            WHEN country IS NOT NULL AND region IS NOT NULL AND city IS NOT NULL THEN 3
+            WHEN country IS NOT NULL AND region IS NOT NULL THEN 2
             WHEN country IS NOT NULL THEN 1
         END,
-        country IS NOT NULL
+        (country IS NOT NULL OR region IS NOT NULL OR city IS NOT NULL)
     FROM ip_locations
     ON CONFLICT (country_name, region_name, city_name) DO NOTHING
 """

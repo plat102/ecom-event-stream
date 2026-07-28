@@ -1,18 +1,24 @@
 """Derive event_timestamp/report_date/hour, country_domain, browser/os/device_category, email_hash."""
 
 from pyspark.sql.functions import (
+    coalesce,
     col,
     hour,
     lit,
     regexp_extract,
     sha2,
+    timestamp_seconds,
     to_date,
     to_timestamp,
+    to_utc_timestamp,
     udf,
     when,
 )
 from pyspark.sql.types import StringType, StructField, StructType
 from user_agents import parse as parse_user_agent
+
+# local_time is the source generator's clock, not the visitor's and not UTC
+_SOURCE_CLOCK_TZ = "Asia/Ho_Chi_Minh"
 
 _UA_RESULT_SCHEMA = StructType(
     [
@@ -40,21 +46,30 @@ def _parse_ua(user_agent):
 
 
 def enrich(df):
-    """local_time is a naive UTC string — the process needs BOTH `TZ=UTC` in its environment
-    (before the JVM starts) AND `spark.sql.session.timeZone=UTC` on the session, or timestamps
-    get shifted by the host's local offset on collect()/JDBC read-write, not just SQL functions.
+    """Needs BOTH `TZ=UTC` in the environment (before the JVM starts) AND
+    `spark.sql.session.timeZone=UTC` on the session, or timestamps shift by the host's offset on
+    collect()/JDBC read-write, not just in SQL functions.
 
-    Drops rows whose local_time fails to parse (event_timestamp would be null, which
-    fact_event's NOT NULL report_date can't accept).
+    Drops rows where neither time source is usable — report_date is NOT NULL in fact_event.
     """
     df = (
-        df.withColumn("event_timestamp", to_timestamp(col("local_time"), "yyyy-MM-dd HH:mm:ss"))
+        # time_stamp is an absolute epoch, so it carries no timezone assumption at all.
+        # local_time only covers the ~5-in-640k events that arrive without one.
+        df.withColumn(
+            "event_timestamp",
+            coalesce(
+                timestamp_seconds(col("time_stamp")),
+                to_utc_timestamp(
+                    to_timestamp(col("local_time"), "yyyy-MM-dd HH:mm:ss"), _SOURCE_CLOCK_TZ
+                ),
+            ),
+        )
         .filter(col("event_timestamp").isNotNull())
         .withColumn("report_date", to_date(col("event_timestamp")))
         .withColumn("hour", hour(col("event_timestamp")))
     )
 
-    # Last TLD segment: glamira.cl -> "cl", glamira.com.br -> "br", glamira.com -> "com".
+    # glamira.cl -> "cl", glamira.com.br -> "br", glamira.com -> "com".
     df = df.withColumn(
         "country_domain",
         regexp_extract(col("current_url"), r"https?://(?:www\.)?[^/]+\.([a-zA-Z]{2,})", 1),

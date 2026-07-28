@@ -4,7 +4,7 @@ Unit tests for Enricher.
 
 import hashlib
 
-from pyspark.sql.types import StringType, StructField, StructType
+from pyspark.sql.types import LongType, StringType, StructField, StructType
 
 from enrich import enrich
 
@@ -15,16 +15,20 @@ ROW_SCHEMA = StructType(
         StructField("id", StringType()),
         StructField("collection", StringType()),
         StructField("local_time", StringType()),
+        StructField("time_stamp", LongType()),
         StructField("current_url", StringType()),
         StructField("user_agent", StringType()),
         StructField("email_address", StringType()),
     ]
 )
 
+# The two time fields describe the same instant: 1784036380 is 2026-07-14 13:39:40 UTC, and
+# local_time is that rendered on the source generator's UTC+7 clock.
 BASE_ROW = {
     "id": "abc-123",
     "collection": "view_product_detail",
     "local_time": "2026-07-14 20:39:40",
+    "time_stamp": 1784036380,
     "current_url": "https://www.glamira.cl/bratara/585-aur-galben/",
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36",
     "email_address": None,
@@ -40,20 +44,40 @@ def _to_df(spark, rows):
     return spark.createDataFrame(rows, ROW_SCHEMA)
 
 
-def test_event_timestamp_report_date_hour(spark):
+def test_event_timestamp_comes_from_the_epoch_not_local_time(spark):
+    """local_time reads 20:39:40 but the instant is 13:39:40 UTC. Taking local_time at face
+    value put every timestamp 7 hours late — see bugs/003."""
     df = _to_df(spark, [BASE_ROW])
     row = enrich(df).collect()[0]
 
-    assert str(row.event_timestamp) == "2026-07-14 20:39:40"
+    assert str(row.event_timestamp) == "2026-07-14 13:39:40"
     assert str(row.report_date) == "2026-07-14"
-    assert row.hour == 20
+    assert row.hour == 13
 
 
-def test_unparseable_local_time_dropped(spark):
-    row = {**BASE_ROW, "local_time": "not-a-timestamp"}
-    df = _to_df(spark, [row])
+def test_local_time_fallback_when_epoch_missing(spark):
+    """~5 in 640k events arrive without time_stamp; local_time still resolves them, converted
+    out of the generator's UTC+7 clock rather than read as UTC."""
+    df = _to_df(spark, [{**BASE_ROW, "time_stamp": None}])
+    row = enrich(df).collect()[0]
 
-    assert enrich(df).count() == 0
+    assert str(row.event_timestamp) == "2026-07-14 13:39:40"
+    assert row.hour == 13
+
+
+def test_epoch_wins_when_the_two_time_fields_disagree(spark):
+    """A source that changes its clock must not silently move event_timestamp."""
+    df = _to_df(spark, [{**BASE_ROW, "local_time": "2020-01-01 00:00:00"}])
+
+    assert str(enrich(df).collect()[0].event_timestamp) == "2026-07-14 13:39:40"
+
+
+def test_row_dropped_only_when_both_time_fields_are_unusable(spark):
+    usable = {**BASE_ROW, "local_time": "not-a-timestamp"}  # epoch still present
+    unusable = {**BASE_ROW, "local_time": "not-a-timestamp", "time_stamp": None}
+
+    assert enrich(_to_df(spark, [usable])).count() == 1
+    assert enrich(_to_df(spark, [unusable])).count() == 0
 
 
 def test_country_domain_simple_tld(spark):

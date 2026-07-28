@@ -199,10 +199,20 @@ with tab_overview:
 # ══════════════════════════════════════════════════════════════════════════
 with tab_day:
     dates = query("SELECT DISTINCT report_date FROM fact_event ORDER BY 1 DESC")
+    # Every chart on this tab reads the product-view views, so that is the count worth showing.
+    views_per_day = query(
+        "SELECT report_date, COUNT(*) AS views FROM v_product_view_enriched GROUP BY 1"
+    ).set_index("report_date")["views"]
 
     controls, _ = st.columns([2, 3])
     with controls:
-        report_date = st.selectbox("Report date", dates["report_date"], format_func=str)
+        # The newest day is always partial — the source replays ~30h behind wall clock, so it
+        # only holds the hours the replay has reached. Without the count that reads as broken.
+        report_date = st.selectbox(
+            "Report date",
+            dates["report_date"],
+            format_func=lambda d: f"{d} — {views_per_day.get(d, 0):,} views",
+        )
         top_n = st.slider("Top N", min_value=5, max_value=50, value=10, step=5)
     st.caption(
         "The views expose report_date instead of hard-coding today, so any past day works here."

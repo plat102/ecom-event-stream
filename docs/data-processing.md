@@ -2,7 +2,7 @@
 
 Pipeline: local Kafka (`user-events`) → Spark Structured Streaming → PostgreSQL star schema (`fact_event` + dims) → SQL views → Streamlit dashboard.
 
-## Data flow
+## Data processing flow
 
 ![processing](attachments/processing.png)
 
@@ -20,6 +20,8 @@ Trigger interval is 60 seconds. Checkpoint lives in `checkpoints/ecom-stream-pro
 ## Results
 
 **Live run**: events flow from `user-events` into `fact_event` within one trigger interval; `dim_product` and `dim_device` grow as new products and browser/OS combinations appear.
+
+![Spark running](./attachments/process-running.gif)
 
 ### Verifying the data
 
@@ -51,9 +53,19 @@ FROM fact_event;
 
 Three tabs: **One day** (the six reports, one date at a time), **Overview** (everything, no date filter), **Live** (auto-refreshes every 5s).
 
+Examples:
+
+- [Tab One day](./attachments/dashboard/OneDay.pdf)
+- [Tab Overview](./attachments/dashboard/Overview.pdf)
+- [Tab Live](./attachments/dashboard/Live.pdf)
+
+![sample_oneday](./attachments/dashboard/sample_oneday.png)
+
 #### Spark UI
 
 [http://localhost:4040](http://localhost:4040) while the job runs — completed batches, failed tasks, input rate per trigger.
+
+![Spark Application UI](./attachments/spark-app-ui.gif)
 
 ---
 

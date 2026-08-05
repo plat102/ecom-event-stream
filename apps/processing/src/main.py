@@ -10,21 +10,21 @@ Usage:
       apps/processing/src/main.py
 """
 
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col
-
 from dlq import route_dlq
 from enrich import enrich
 from filter import validate_events
 from lookup import load_static_dims, lookup_static_dims
 from parse import parse_raw
 from payload_split import split_payload
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col
+from upsert import relookup_dynamic_dims, upsert_dim_device, upsert_dim_product
+from write import write_fact_event
+
 from shared.config.settings import settings
 from shared.connectors.spark_kafka import kafka_source_options
 from shared.schemas.event_type import KNOWN_EVENT_TYPES
 from shared.utils.logger import get_logger
-from upsert import relookup_dynamic_dims, upsert_dim_device, upsert_dim_product
-from write import write_fact_event
 
 log = get_logger("main")
 

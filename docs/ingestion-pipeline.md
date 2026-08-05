@@ -17,7 +17,6 @@ Pipeline: external source Kafka (`product_view`) → validate → local Kafka (`
 
 ![live run](./attachments/ingest-running.gif)
 
-
 ### Verifying the data
 
 #### AKHQ - browse Kafka
@@ -67,7 +66,9 @@ Other useful targets: `make ps` (container status), `make logs` (tail logs), `ma
 ```bash
 # product_view -> user-events / dlq
 poetry run python apps/ingestion/src/bridge.py
+```
 
+```Shell
 # user-events -> MongoDB
 poetry run python apps/ingestion/src/mongo_sink.py
 ```

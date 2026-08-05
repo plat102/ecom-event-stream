@@ -42,9 +42,13 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = ""
     POSTGRES_PASSWORD: str = ""
 
-    # Tuning
+    # Tuning - mongo_sink: docs per insert_many
     BATCH_SIZE: int = 500
     FLUSH_INTERVAL_SECONDS: float = 2.0
+
+    # Tuning - bridge: messages produced before offsets are committed
+    BRIDGE_BATCH_SIZE: int = 100
+    BRIDGE_FLUSH_INTERVAL_SECONDS: float = 1.0
 
     # Logging
     LOG_FORMAT: str = "pretty"  # "pretty" | "json"

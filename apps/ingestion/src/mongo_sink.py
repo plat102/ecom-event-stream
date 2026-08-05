@@ -58,19 +58,12 @@ class MongoDBWriter:
     def __init__(self, collection) -> None:
         self._collection = collection
 
-    def _commit_all_partitions(self, consumer, msgs: list) -> None:
-        last_per_partition: dict[int, object] = {}
-        for msg in msgs:
-            last_per_partition[msg.partition()] = msg
-        for msg in last_per_partition.values():
-            consumer.commit(message=msg)
-
     def write(self, docs: list[dict], consumer, msgs: list) -> None:
         for attempt in range(MAX_RETRIES):
             try:
                 # ordered=False: one bad doc doesn't abort the rest of the batch
                 self._collection.insert_many(docs, ordered=False)
-                self._commit_all_partitions(consumer, msgs)
+                consumer.commit_batch(msgs)
                 log.info(f"inserted {len(docs)} docs")
                 return
 
@@ -82,7 +75,7 @@ class MongoDBWriter:
                     raise
                 dup_count = len(e.details.get("writeErrors", []))
                 log.warning(f"skipped {dup_count} duplicate doc(s), committing offset")
-                self._commit_all_partitions(consumer, msgs)
+                consumer.commit_batch(msgs)
                 return
 
             except Exception as e:

@@ -36,6 +36,19 @@ class KafkaConsumerClient:
     def commit(self, message=None, asynchronous: bool = False) -> None:
         self._consumer.commit(message=message, asynchronous=asynchronous)
 
+    def commit_batch(self, messages: list) -> None:
+        """Commit the last message of each partition.
+
+        `commit(message=...)` only advances the offset of that message's own partition,
+        so committing the last message of a mixed batch would leave the other
+        partitions uncommitted and accumulating lag.
+        """
+        last_per_partition: dict[int, object] = {}
+        for msg in messages:
+            last_per_partition[msg.partition()] = msg
+        for msg in last_per_partition.values():
+            self.commit(message=msg)
+
     def close(self) -> None:
         self._consumer.close()
 
@@ -53,8 +66,20 @@ class KafkaProducerClient:
     def produce(self, topic: str, value: bytes, on_delivery=None) -> None:
         self._producer.produce(topic, value=value, on_delivery=on_delivery)
 
+    def poll(self, timeout: float = 0) -> int:
+        """Serve delivery callbacks for already-acked messages without blocking."""
+        return self._producer.poll(timeout)
+
     def flush(self, timeout: float = 10.0) -> None:
-        self._producer.flush(timeout)
+        """Block until every queued message is acked, or raise.
+
+        librdkafka returns the number of messages still queued when the timeout hits.
+        Discarding it would let the caller commit offsets for messages that never
+        reached the broker.
+        """
+        remaining = self._producer.flush(timeout)
+        if remaining:
+            raise RuntimeError(f"{remaining} message(s) not acked after {timeout}s")
 
     def __enter__(self) -> Self:
         return self

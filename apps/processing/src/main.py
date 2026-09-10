@@ -62,6 +62,7 @@ def main():
     raw = (
         kafka_source_options(spark.readStream, settings, settings.SINK_KAFKA_TOPIC)
         .option("startingOffsets", "latest")
+        .option("failOnDataLoss", "false")
         .load()
     )
 

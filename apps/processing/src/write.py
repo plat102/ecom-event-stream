@@ -1,14 +1,15 @@
 """Insert the enriched batch into fact_event, skipping events already written."""
-from types import SimpleNamespace
-
 from pyspark.sql.functions import col, lit
 
 from shared.config.settings import settings
-from shared.connectors.postgres import PostgresClient
+from shared.connectors.postgres import PostgresClient, jdbc_properties, jdbc_url
+
+_STAGING_TABLE = "stg_fact_event"
 
 
 def write_fact_event(enriched_batch) -> int:
-    """Insert with ON CONFLICT (event_id) DO NOTHING, one connection per Spark partition.
+    """Stage the batch over JDBC, then merge it in with ON CONFLICT (event_id) DO NOTHING.
+    
     """
     fact_df = enriched_batch.select(
         "event_type",
@@ -34,37 +35,30 @@ def write_fact_event(enriched_batch) -> int:
         "resolution",
         "utm_source",
         "utm_medium",
-        col("payload").cast("string"),  # an untyped literal, so Postgres reads it as jsonb
+        col("payload").cast("string"),  # staged as text, cast back to jsonb on the way in
         "kafka_partition",
         "kafka_offset",
     )
 
     # Built from fact_df.columns
+    columns = fact_df.columns
+    select_list = ", ".join(
+        "payload::jsonb" if c == "payload" else c for c in columns
+    )
     insert_sql = f"""
-        INSERT INTO fact_event ({", ".join(fact_df.columns)})
-        VALUES %s
+        INSERT INTO fact_event ({", ".join(columns)})
+        SELECT {select_list} FROM {_STAGING_TABLE}
         ON CONFLICT (event_id) DO NOTHING
-        RETURNING 1
     """
 
-    # Plain values, not the pydantic settings object — this crosses into the executors
-    conn = SimpleNamespace(
-        POSTGRES_HOST=settings.POSTGRES_HOST,
-        POSTGRES_PORT=settings.POSTGRES_PORT,
-        POSTGRES_DB=settings.POSTGRES_DB,
-        POSTGRES_USER=settings.POSTGRES_USER,
-        POSTGRES_PASSWORD=settings.POSTGRES_PASSWORD,
+    # Staged over JDBC so the write stays on the executors — they run the cluster's bare
+    # python, which has no psycopg2, and a batch replaying a backlog is too big to collect
+    fact_df.write.jdbc(
+        url=jdbc_url(settings),
+        table=_STAGING_TABLE,
+        mode="overwrite",
+        properties=jdbc_properties(settings),
     )
 
-    def insert_partition(rows):
-        values = [tuple(row) for row in rows]
-        if not values:
-            return iter([0])  # no connection for an empty partition
-        with PostgresClient(conn) as pg:
-            # fetch=True is required for an accurate count: execute_values pages internally,
-            # so cursor.rowcount would only reflect the last page. RETURNING 1 emits a row
-            # per insert and nothing for a skipped conflict.
-            inserted = pg.execute_values(insert_sql, values, fetch=True)
-        return iter([len(inserted)])
-
-    return sum(fact_df.rdd.mapPartitions(insert_partition).collect())
+    with PostgresClient(settings) as pg:
+        return pg.execute(insert_sql)

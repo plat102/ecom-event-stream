@@ -12,6 +12,11 @@ SPARK_PACKAGES := org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.9,org.postgresq
 
 PSQL := docker exec -i postgresql psql -U $${POSTGRES_USER:-ecom} -d $${POSTGRES_DB:-ecom_analytics}
 
+# The two run modes keep separate checkpoints, so Spark's own concurrent-query guard never
+# fires between them — this lock is what keeps only one processing job alive.
+STREAM_LOCK := .stream-job.lock
+STREAM_BUSY := "A processing job already holds $(STREAM_LOCK) — only one may run at a time"
+
 .PHONY: up down ps logs topics test psql views \
 	yarn-up yarn-down yarn-ps hdfs-init run-local run-yarn smoke-yarn
 
@@ -52,15 +57,17 @@ hdfs-init: ## Create the HDFS home directory Spark stages into (run once)
 	docker exec -i hadoop-namenode-1 bash -c \
 		'hdfs dfs -mkdir -p /user/spark && hdfs dfs -chown -R spark:spark /user/spark && hdfs dfs -ls /user/'
 
-run-local: ## Run the processing job in local mode
-	TZ=UTC poetry run spark-submit \
+run-local: ## Run the processing job in local mode (exclusive)
+	@TZ=UTC flock -n -E 99 $(STREAM_LOCK) poetry run spark-submit \
 		--master "local[*]" \
 		--packages "$(SPARK_PACKAGES)" \
 		--conf spark.sql.session.timeZone=UTC \
-		apps/processing/src/main.py
+		apps/processing/src/main.py; \
+	s=$$?; [ $$s -eq 99 ] && { echo "$(STREAM_BUSY)" >&2; exit 1; }; exit $$s
 
-run-yarn: ## Run the processing job on YARN (client deploy-mode)
-	scripts/submit_yarn.sh
+run-yarn: ## Run the processing job on YARN (client deploy-mode, exclusive)
+	@flock -n -E 99 $(STREAM_LOCK) scripts/submit_yarn.sh; \
+	s=$$?; [ $$s -eq 99 ] && { echo "$(STREAM_BUSY)" >&2; exit 1; }; exit $$s
 
 smoke-yarn: ## Run the connectivity smoke test on YARN
 	APP=apps/processing/src/smoke_test.py scripts/submit_yarn.sh

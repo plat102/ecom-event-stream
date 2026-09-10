@@ -180,3 +180,5 @@ service-account*.json
 
 *.excalidraw-*
 .vscode
+# Mutex for the streaming job (see Makefile STREAM_LOCK)
+/.stream-job.lock

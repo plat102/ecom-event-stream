@@ -10,6 +10,9 @@ Usage:
       apps/processing/src/main.py
 """
 
+import os
+from pathlib import Path
+
 from dlq import route_dlq
 from enrich import enrich
 from filter import validate_events
@@ -28,8 +31,14 @@ from shared.utils.logger import get_logger
 
 log = get_logger("main")
 
-CHECKPOINT_LOCATION = (
-    "checkpoints/ecom-stream-processor"  # relative to local[*] spark-submit's cwd
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+# Each run mode keeps its own progress line, on purpose. The scheme must be explicit: a
+# relative path resolves against fs.defaultFS, which silently differs between the modes.
+RUN_PROFILE = os.environ.get("RUN_PROFILE", "local")
+CHECKPOINT_LOCATION = os.environ.get(
+    "CHECKPOINT_LOCATION",
+    f"file://{_REPO_ROOT}/checkpoints/ecom-stream-processor-{RUN_PROFILE}",
 )
 
 
@@ -56,6 +65,7 @@ def build_process_batch(spark):
 def main():
     spark = SparkSession.builder.appName("ecom-stream-processor").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
+    log.info(f"run_profile={RUN_PROFILE} checkpoint={CHECKPOINT_LOCATION}")
 
     dims = load_static_dims(spark)
 

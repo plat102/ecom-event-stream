@@ -31,6 +31,8 @@ exec docker run --rm -i --name ecom-spark-yarn \
   -e TZ=UTC \
   -e HADOOP_CONF_DIR=/hadoop-conf \
   -e HADOOP_USER_NAME=spark \
+  -e RUN_PROFILE=yarn \
+  -e CHECKPOINT_LOCATION="${CHECKPOINT_LOCATION:-hdfs://namenode/user/spark/checkpoints/ecom-stream-processor-yarn}" \
   -e PYSPARK_PYTHON=/usr/bin/python3.12 \
   -e PYSPARK_DRIVER_PYTHON="$REPO/.venv/bin/python" \
   -e SINK_KAFKA_BROKERS=kafka-0:9092,kafka-1:9092,kafka-2:9092 \

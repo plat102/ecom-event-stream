@@ -1,0 +1,32 @@
+{
+  "name": "ecom-event-stream · orchestration",
+  // Same Dockerfile as the Airflow runtime, so the editor resolves exactly the packages the
+  // DAGs will run against — and nothing has to be installed on the host.
+  "build": {
+    "dockerfile": "../infrastructure/docker/airflow/Dockerfile",
+    "context": "../infrastructure/docker/airflow"
+  },
+  // updateRemoteUserUID (on by default for a non-root user) maps this user to the host's,
+  // so files edited in here keep their ownership.
+  "remoteUser": "airflow",
+  // Editor-only extras: what `shared/` imports, minus pyspark and streamlit — the processing
+  // and dashboard apps are edited against the Poetry venv, which has those. ruff is pinned,
+  // so its rule set matches what the project is checked against.
+  "postCreateCommand": "pip install --quiet loguru pydantic-settings python-dotenv pymongo ruff==0.6.9",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "ms-python.vscode-pylance"],
+      "settings": {
+        "python.defaultInterpreterPath": "/home/airflow/.local/bin/python",
+        "python.analysis.extraPaths": [
+          ".",
+          "apps/orchestration/plugins",
+          "apps/ingestion/src",
+          "apps/processing/src"
+        ],
+        "python.testing.pytestEnabled": true,
+        "python.testing.pytestArgs": ["apps/orchestration/tests"]
+      }
+    }
+  }
+}

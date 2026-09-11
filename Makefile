@@ -3,6 +3,14 @@ COMPOSE := docker compose --env-file .env \
 	-f infrastructure/docker/docker-compose.db.yml \
 	-f infrastructure/docker/docker-compose.dashboard.yml
 
+COMPOSE_AIRFLOW := docker compose --env-file .env \
+	-f infrastructure/docker/docker-compose.airflow.yml
+
+# Read from .env so make and compose agree. Lazy `=`, so `make help` on a clone without a
+# .env stays quiet; last value wins and surrounding quotes go, as compose's dotenv does.
+AIRFLOW_META_PW = $(shell sed -n 's/^AIRFLOW_METADATA_PASSWORD=//p' .env 2>/dev/null \
+	| tail -1 | sed -e 's/^"\(.*\)"$$/\1/' -e "s/^'\(.*\)'$$/\1/")
+
 HADOOP_CONTAINERS := hadoop-namenode-1 hadoop-datanode1-1 \
 	hadoop-resourcemanager-1 hadoop-nodemanager1-1
 
@@ -18,7 +26,9 @@ STREAM_LOCK := .stream-job.lock
 STREAM_BUSY := "A processing job already holds $(STREAM_LOCK) — only one may run at a time"
 
 .PHONY: up down ps logs topics test psql views \
-	yarn-up yarn-down yarn-ps hdfs-init run-local run-yarn smoke-yarn
+	yarn-up yarn-down yarn-ps hdfs-init run-local run-yarn smoke-yarn \
+	airflow-build airflow-db airflow-init airflow-up airflow-down airflow-logs \
+	airflow-ps airflow-cli
 
 up: ## Start infrastructure (Kafka cluster + MongoDB + PostgreSQL)
 	$(COMPOSE) up -d
@@ -71,3 +81,35 @@ run-yarn: ## Run the processing job on YARN (client deploy-mode, exclusive)
 
 smoke-yarn: ## Run the connectivity smoke test on YARN
 	APP=apps/processing/src/smoke_test.py scripts/submit_yarn.sh
+
+airflow-build: ## Build the Airflow image
+	$(COMPOSE_AIRFLOW) build
+
+airflow-db: ## Create the airflow role + metadata database on the warehouse instance (run once)
+	@test -n "$(AIRFLOW_META_PW)" || { echo "AIRFLOW_METADATA_PASSWORD is not set in .env" >&2; exit 1; }
+	@$(PSQL) -tAc "SELECT 1 FROM pg_roles WHERE rolname='airflow'" | grep -q 1 || \
+		$(PSQL) -c "CREATE ROLE airflow LOGIN"
+	@$(PSQL) -c "ALTER ROLE airflow LOGIN PASSWORD '$(AIRFLOW_META_PW)'" >/dev/null
+	@$(PSQL) -tAc "SELECT 1 FROM pg_database WHERE datname='airflow'" | grep -q 1 || \
+		$(PSQL) -c "CREATE DATABASE airflow OWNER airflow"
+	@echo "airflow role + database ready"
+
+airflow-init: ## Apply metadata migrations and create the admin user (idempotent)
+	@mkdir -p apps/orchestration/logs
+	$(COMPOSE_AIRFLOW) run --rm airflow-init
+
+airflow-up: ## Start Airflow (webserver on http://localhost:18080 + scheduler)
+	@mkdir -p apps/orchestration/logs
+	$(COMPOSE_AIRFLOW) up -d
+
+airflow-down: ## Stop Airflow
+	$(COMPOSE_AIRFLOW) down
+
+airflow-logs: ## Tail the Airflow container logs
+	$(COMPOSE_AIRFLOW) logs -f
+
+airflow-ps: ## Show Airflow container status
+	$(COMPOSE_AIRFLOW) ps
+
+airflow-cli: ## Run an airflow CLI command, e.g. make airflow-cli ARGS="dags list"
+	$(COMPOSE_AIRFLOW) exec airflow-scheduler airflow $(ARGS)

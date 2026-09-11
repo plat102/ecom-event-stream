@@ -182,3 +182,7 @@ service-account*.json
 .vscode
 # Mutex for the streaming job (see Makefile STREAM_LOCK)
 /.stream-job.lock
+
+# Airflow: task logs are runtime state, and the resolved connection file holds secrets
+/apps/orchestration/logs/
+/apps/orchestration/config/connections.json

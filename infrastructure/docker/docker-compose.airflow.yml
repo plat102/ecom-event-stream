@@ -1,0 +1,83 @@
+# Own project name: sharing one with the data services makes each look orphaned to the other.
+name: ecom-event-stream-airflow
+
+x-airflow-common: &airflow-common
+  image: ecom-event-stream/airflow:2.10.4
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    # Own role, not the warehouse user: that password has characters this URL cannot hold.
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_METADATA_PASSWORD:?set AIRFLOW_METADATA_PASSWORD in .env}@postgresql:5432/airflow
+    # Required: without it connection secrets sit unencrypted in the metadata database.
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?set AIRFLOW_FERNET_KEY in .env}
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: UTC
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    # Every log_url in an alert is built from this, and the port published below is 18080.
+    AIRFLOW__WEBSERVER__BASE_URL: http://localhost:18080
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
+    PYTHONPATH: /opt/repo
+    # An env var beats .env in pydantic-settings, so these override its localhost defaults.
+    POSTGRES_HOST: postgresql
+    POSTGRES_PORT: 5432
+    SINK_KAFKA_BROKERS: kafka-0:9092,kafka-1:9092,kafka-2:9092
+    MONGO_HOST: mongodb:27017
+  volumes:
+    - ../../apps/orchestration/dags:/opt/airflow/dags
+    - ../../apps/orchestration/plugins:/opt/airflow/plugins
+    - ../../apps/orchestration/config:/opt/airflow/config
+    - ../../apps/orchestration/logs:/opt/airflow/logs
+    # Read-only repo: plugins import the shared connectors from here.
+    - ../..:/opt/repo:ro
+  user: "${AIRFLOW_UID:-50000}:0"
+  networks:
+    - streaming-network
+
+services:
+  # No depends_on for postgresql — it lives in the other compose project. Start that first.
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    hostname: airflow-webserver
+    # Only this service builds: two builders exporting the same tag collide.
+    build:
+      context: ./airflow
+    command: webserver
+    ports:
+      - "18080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    hostname: airflow-scheduler
+    command: scheduler
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # One-shot, behind a profile so `up` skips it; the entrypoint acts on the two flags below.
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    profiles:
+      - init
+    command: version
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-admin}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:?set AIRFLOW_ADMIN_PASSWORD in .env}
+
+networks:
+  streaming-network:
+    external: true

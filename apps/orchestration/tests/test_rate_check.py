@@ -1,6 +1,8 @@
 """Unit tests for the rate operator: the arithmetic, and the cases that must skip rather than
 fail. Marks are read from the DAG's state Variable and staged on XCom, never written here —
 the commit is one task at the end of the run. Needs airflow, so it runs in the image."""
+import time
+
 import pytest
 
 pytest.importorskip("airflow", reason="airflow is only installed in the Airflow image")
@@ -101,8 +103,6 @@ def test_first_run_skips_and_stores_the_mark(store):
 
 
 def test_second_run_returns_the_rate(store):
-    import time
-
     _mark(store, at=time.time() - 60, value=1000)
     result = _operator(measure=lambda: 1600).execute(_context())
     assert result["rate_per_minute"] == pytest.approx(600, rel=0.05)
@@ -111,8 +111,6 @@ def test_second_run_returns_the_rate(store):
 
 def test_a_window_shorter_than_the_minimum_skips(store):
     # a manual run seconds after a scheduled one divides a few messages by a few seconds
-    import time
-
     _mark(store, at=time.time() - 10, value=1000)
     with pytest.raises(AirflowSkipException, match="under the 60s"):
         _operator(measure=lambda: 1001, min_rate=100).execute(_context())
@@ -120,8 +118,6 @@ def test_a_window_shorter_than_the_minimum_skips(store):
 
 def test_a_window_left_behind_by_an_outage_skips(store):
     # the task was skipped while the job was down, so the mark predates the gap
-    import time
-
     _mark(store, at=time.time() - 7200, value=1000)
     operator = RateCheckOperator(
         task_id="rate",
@@ -143,8 +139,6 @@ def test_counter_going_backwards_skips_instead_of_reporting_a_negative_rate(stor
 
 
 def test_rate_below_the_floor_fails_with_the_measured_number(store):
-    import time
-
     _mark(store, at=time.time() - 60, value=1000)
     context = _context()
     with pytest.raises(AirflowException) as failure:
@@ -156,8 +150,6 @@ def test_rate_below_the_floor_fails_with_the_measured_number(store):
 
 def test_rate_above_the_ceiling_fails_with_the_measured_number(store):
     # the DLQ check is the other direction: new rejects per minute, not a floor
-    import time
-
     _mark(store, at=time.time() - 60, value=500)
     operator = RateCheckOperator(
         task_id="dlq",
@@ -173,8 +165,6 @@ def test_rate_above_the_ceiling_fails_with_the_measured_number(store):
 
 def test_a_threshold_arriving_as_a_rendered_string_is_still_a_number(store):
     # thresholds come from a Variable through a Jinja template, so they arrive as text
-    import time
-
     _mark(store, at=time.time() - 60, value=1000)
     operator = RateCheckOperator(
         task_id="rate",
@@ -188,8 +178,6 @@ def test_a_threshold_arriving_as_a_rendered_string_is_still_a_number(store):
 
 
 def test_an_unset_threshold_renders_empty_and_means_no_limit(store):
-    import time
-
     _mark(store, at=time.time() - 60, value=1000)
     operator = RateCheckOperator(
         task_id="rate",
@@ -204,8 +192,6 @@ def test_an_unset_threshold_renders_empty_and_means_no_limit(store):
 
 def test_the_operator_never_writes_the_state_variable_itself(store):
     # several checks stage marks in parallel; one committer at the end of the run writes them
-    import time
-
     _mark(store, at=time.time() - 60, value=1000)
     context = _context()
     _operator(measure=lambda: 1600).execute(context)
@@ -215,8 +201,6 @@ def test_the_operator_never_writes_the_state_variable_itself(store):
 
 def test_the_new_mark_is_staged_even_when_the_check_fails(store):
     # one failed run must not leave the next one without a baseline
-    import time
-
     _mark(store, at=time.time() - 60, value=1000)
     context = _context()
     with pytest.raises(AirflowException):

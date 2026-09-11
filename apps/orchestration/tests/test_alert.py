@@ -6,10 +6,10 @@ import pytest
 
 pytest.importorskip("airflow", reason="airflow is only installed in the Airflow image")
 
-import sys  # noqa: E402
+import sys
 
-from callbacks import alert  # noqa: E402
-from callbacks.alert import MESSAGE_LIMIT, failure_message, notify_failure  # noqa: E402
+from callbacks import alert
+from callbacks.alert import MESSAGE_LIMIT, failure_message, notify_failure
 
 LOG_URL = "http://localhost:18080/log?dag_id=kafka_health_monitor&task_id=check_sink_brokers"
 HOOK_MODULE = "airflow.providers.discord.hooks.discord_webhook"

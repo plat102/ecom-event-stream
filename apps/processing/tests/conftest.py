@@ -8,7 +8,7 @@ import pytest
 # doesn't cover timestamp conversion on JDBC read/write, only SQL functions.
 os.environ.setdefault("TZ", "UTC")
 
-from pyspark.sql import SparkSession  # noqa: E402
+from pyspark.sql import SparkSession
 
 
 @pytest.fixture(scope="session")

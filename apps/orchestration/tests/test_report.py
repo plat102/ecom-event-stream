@@ -1,5 +1,8 @@
 """Unit tests for the run digest: what it always contains, and what it drops when the message
 would not fit."""
+import pytest
+
+from callbacks import report
 from callbacks.report import MESSAGE_LIMIT, build_report, describe
 
 LOG_URL = "http://localhost:18080/log?task_id=check_sink_group_status"
@@ -56,8 +59,15 @@ def test_failed_checks_carry_their_reason_and_log_link():
 
 
 def test_a_failure_without_a_recorded_measurement_still_appears():
-    report = _report([_row("check_topics_exist", "upstream_failed", None)])
+    report = _report([_row("check_topics_exist", "failed", None)])
     assert "no reason recorded" in report
+
+
+def test_a_task_blocked_by_an_upstream_failure_says_so_without_a_log_link():
+    # its log is empty, and the link would cost ~130 characters of the budget
+    report = _report([_row("compare_rates", "upstream_failed", None)])
+    assert "upstream failed, did not run" in report
+    assert LOG_URL not in report
 
 
 def test_healthy_run_has_no_failed_section():
@@ -88,3 +98,58 @@ def test_failures_come_before_measurements_when_the_budget_runs_out():
     assert len(report) <= MESSAGE_LIMIT
     assert "`check_0`" in report
     assert "**measured**" not in report
+
+
+# ── run state ─────────────────────────────────────────────────────────
+
+
+class FakeInstance:
+    def __init__(self, task_id, state) -> None:
+        self.task_id = task_id
+        self.state = state
+        self.log_url = LOG_URL
+
+
+class FakeDagRun:
+    dag_id = "spark_health_monitor"
+
+    def __init__(self, instances) -> None:
+        self._instances = instances
+
+    def get_task_instances(self):
+        return self._instances
+
+
+class FakeTaskInstance:
+    task_id = "mark_run_state"
+
+    def xcom_pull(self, task_ids, key):
+        return None
+
+
+def _run_context(*states) -> dict:
+    return {
+        "ti": FakeTaskInstance(),
+        "dag_run": FakeDagRun([FakeInstance(f"check_{i}", s) for i, s in enumerate(states)]),
+    }
+
+
+def test_a_clean_run_stays_green():
+    report.fail_run_if_checks_failed(_run_context("success", "skipped"))
+
+
+@pytest.fixture()
+def airflow_installed():
+    """Only the raising path needs it — a clean run never touches Airflow."""
+    pytest.importorskip("airflow", reason="airflow is only installed in the Airflow image")
+
+
+def test_a_run_with_a_failed_check_goes_red(airflow_installed):
+    # the report task succeeds by design on ALL_DONE, so without this the grid lies
+    with pytest.raises(Exception, match=r"1 check\(s\) failed"):
+        report.fail_run_if_checks_failed(_run_context("success", "failed"))
+
+
+def test_upstream_failures_count_too(airflow_installed):
+    with pytest.raises(Exception, match=r"2 check\(s\) failed"):
+        report.fail_run_if_checks_failed(_run_context("failed", "upstream_failed", "success"))

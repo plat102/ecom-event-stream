@@ -115,7 +115,7 @@ airflow-seed: ## Import DAG connections + variables from apps/orchestration/conf
 	scripts/seed_airflow.sh
 
 airflow-test: ## Run the orchestration tests inside the Airflow image (they import airflow)
-	$(COMPOSE_AIRFLOW) exec -T -e PYTHONPATH=/opt/repo:/opt/airflow/plugins airflow-scheduler \
+	$(COMPOSE_AIRFLOW) exec -T -e PYTHONPATH=/opt/repo:/opt/airflow/plugins:/opt/airflow/dags airflow-scheduler \
 		pytest /opt/repo/apps/orchestration/tests -q -p no:cacheprovider
 
 airflow-cli: ## Run an airflow CLI command, e.g. make airflow-cli ARGS="dags list"

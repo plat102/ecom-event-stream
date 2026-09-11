@@ -7,10 +7,10 @@ import pytest
 
 pytest.importorskip("airflow", reason="airflow is only installed in the Airflow image")
 
-from airflow.exceptions import AirflowException  # noqa: E402
+from airflow.exceptions import AirflowException
 
-from operators import sql_check  # noqa: E402
-from operators.sql_check import SqlCheckOperator, jsonable  # noqa: E402
+from operators import sql_check
+from operators.sql_check import SqlCheckOperator, jsonable
 
 
 class FakeClient:
@@ -32,10 +32,23 @@ class FakeClient:
         self.close()
 
 
+class FakeTaskInstance:
+    def __init__(self) -> None:
+        self.pushed: dict = {}
+
+    def xcom_push(self, key, value):
+        self.pushed[key] = value
+
+
+def _context() -> dict:
+    return {"ti": FakeTaskInstance()}
+
+
 class FakeHook:
     """Replaces WarehouseHook so no Connection and no Postgres are needed."""
 
     last: "FakeHook | None" = None
+    default_conn_name = "postgres_warehouse"
 
     def __init__(self, conn_id) -> None:
         self.conn_id = conn_id
@@ -78,7 +91,7 @@ def test_postgres_types_are_coerced_for_xcom():
 
 def test_passing_check_returns_the_measured_row(warehouse):
     warehouse.rows, warehouse.columns = [(120.0,)], ["staleness_seconds"]
-    assert _operator(predicate=lambda row: row["staleness_seconds"] < 600).execute({}) == {
+    assert _operator(predicate=lambda row: row["staleness_seconds"] < 600).execute(_context()) == {
         "staleness_seconds": 120.0
     }
 
@@ -90,16 +103,16 @@ def test_failure_message_is_formatted_with_the_measured_row(warehouse):
         message="fact_event is {staleness_seconds:.0f}s stale",
     )
     with pytest.raises(AirflowException, match="fact_event is 1830s stale"):
-        operator.execute({})
+        operator.execute(_context())
 
 
 def test_query_returning_more_than_one_row_is_a_check_error(warehouse):
     warehouse.rows, warehouse.columns = [(1,), (2,)], ["n"]
     with pytest.raises(AirflowException, match="returned 2 rows"):
-        _operator().execute({})
+        _operator().execute(_context())
 
 
 def test_the_connection_is_closed_after_the_check(warehouse):
     warehouse.rows, warehouse.columns = [(1,)], ["n"]
-    _operator().execute({})
+    _operator().execute(_context())
     assert FakeHook.last.client.closed

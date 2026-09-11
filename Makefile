@@ -28,7 +28,7 @@ STREAM_BUSY := "A processing job already holds $(STREAM_LOCK) — only one may r
 .PHONY: up down ps logs topics test psql views \
 	yarn-up yarn-down yarn-ps hdfs-init run-local run-yarn smoke-yarn \
 	airflow-build airflow-db airflow-init airflow-up airflow-down airflow-logs \
-	airflow-ps airflow-cli airflow-seed
+	airflow-ps airflow-cli airflow-seed airflow-test
 
 up: ## Start infrastructure (Kafka cluster + MongoDB + PostgreSQL)
 	$(COMPOSE) up -d
@@ -113,6 +113,10 @@ airflow-ps: ## Show Airflow container status
 
 airflow-seed: ## Import DAG connections + variables from apps/orchestration/config
 	scripts/seed_airflow.sh
+
+airflow-test: ## Run the orchestration tests inside the Airflow image (they import airflow)
+	$(COMPOSE_AIRFLOW) exec -T -e PYTHONPATH=/opt/repo:/opt/airflow/plugins airflow-scheduler \
+		pytest /opt/repo/apps/orchestration/tests -q -p no:cacheprovider
 
 airflow-cli: ## Run an airflow CLI command, e.g. make airflow-cli ARGS="dags list"
 	$(COMPOSE_AIRFLOW) exec airflow-scheduler airflow $(ARGS)

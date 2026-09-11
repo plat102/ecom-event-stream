@@ -1,28 +1,33 @@
-"""Unit tests for the rate operator: the arithmetic, and the two cases that must skip rather
-than fail. Needs the airflow package, so it runs in the image."""
-import json
-
+"""Unit tests for the rate operator: the arithmetic, and the cases that must skip rather than
+fail. Marks are read from the DAG's state Variable and staged on XCom, never written here —
+the commit is one task at the end of the run. Needs airflow, so it runs in the image."""
 import pytest
 
 pytest.importorskip("airflow", reason="airflow is only installed in the Airflow image")
 
-from airflow.exceptions import AirflowException, AirflowSkipException  # noqa: E402
+from airflow.exceptions import AirflowException, AirflowSkipException
 
-import marks  # noqa: E402
-from operators import rate_check  # noqa: E402
-from operators.rate_check import RateCheckOperator, rate_per_minute  # noqa: E402
+import marks
 
-STATE_KEY = "TEST_RATE_MARK"
+from operators.rate_check import RateCheckOperator, rate_per_minute
+
+STATE_VARIABLE = "TEST_MONITOR_STATE"
+STATE_KEY = "throughput.sink"
 
 
 class FakeTaskInstance:
-    """Collects the measurements the operator records for the run report."""
+    """Collects what the operator records for the report and stages for the mark committer."""
+
+    task_id = "rate"
 
     def __init__(self) -> None:
         self.pushed: dict = {}
 
     def xcom_push(self, key, value):
         self.pushed[key] = value
+
+    def xcom_pull(self, task_ids, key):
+        return self.pushed.get(key)
 
 
 class FakeDagRun:
@@ -35,12 +40,12 @@ def _context(run_type: str = "scheduled") -> dict:
 
 
 class FakeVariableStore:
-    """Stands in for the Variable table: the operator only get/sets one key."""
+    """Stands in for the Variable table. One row per DAG holds every mark as a dict."""
 
     def __init__(self, initial: dict | None = None) -> None:
         self.values = dict(initial or {})
 
-    def get(self, key, default_var=None):
+    def get(self, key, default_var=None, deserialize_json=False):
         return self.values.get(key, default_var)
 
     def set(self, key, value):
@@ -49,20 +54,23 @@ class FakeVariableStore:
 
 def _operator(measure, min_rate=None) -> RateCheckOperator:
     return RateCheckOperator(
-        task_id="rate", state_key=STATE_KEY, measure=measure, min_rate=min_rate
+        task_id="rate",
+        state_variable=STATE_VARIABLE,
+        state_key=STATE_KEY,
+        measure=measure,
+        min_rate=min_rate,
     )
 
 
 @pytest.fixture()
 def store(monkeypatch):
     fake = FakeVariableStore()
-    monkeypatch.setattr(rate_check, "Variable", fake)
     monkeypatch.setattr(marks, "Variable", fake)
     return fake
 
 
 def _mark(store, at: float, value: float) -> None:
-    store.values[STATE_KEY] = json.dumps({"at": at, "value": value})
+    store.values[STATE_VARIABLE] = {STATE_KEY: {"at": at, "value": value}}
 
 
 # ── rate_per_minute ───────────────────────────────────────────────────
@@ -88,7 +96,7 @@ def test_first_run_skips_and_stores_the_mark(store):
     operator = _operator(measure=lambda: 100)
     with pytest.raises(AirflowSkipException):
         operator.execute(context)
-    assert json.loads(store.values[STATE_KEY])["value"] == 100
+    assert context["ti"].pushed["staged_marks"][STATE_KEY]["value"] == 100
     assert context["ti"].pushed["measured"]["value"] == 100
 
 
@@ -99,6 +107,32 @@ def test_second_run_returns_the_rate(store):
     result = _operator(measure=lambda: 1600).execute(_context())
     assert result["rate_per_minute"] == pytest.approx(600, rel=0.05)
     assert result["previous_value"] == 1000
+
+
+def test_a_window_shorter_than_the_minimum_skips(store):
+    # a manual run seconds after a scheduled one divides a few messages by a few seconds
+    import time
+
+    _mark(store, at=time.time() - 10, value=1000)
+    with pytest.raises(AirflowSkipException, match="under the 60s"):
+        _operator(measure=lambda: 1001, min_rate=100).execute(_context())
+
+
+def test_a_window_left_behind_by_an_outage_skips(store):
+    # the task was skipped while the job was down, so the mark predates the gap
+    import time
+
+    _mark(store, at=time.time() - 7200, value=1000)
+    operator = RateCheckOperator(
+        task_id="rate",
+        state_variable=STATE_VARIABLE,
+        state_key=STATE_KEY,
+        measure=lambda: 2000,
+        min_rate=100,
+        max_interval_seconds=3600,
+    )
+    with pytest.raises(AirflowSkipException, match="over the 3600s"):
+        operator.execute(_context())
 
 
 def test_counter_going_backwards_skips_instead_of_reporting_a_negative_rate(store):
@@ -126,7 +160,11 @@ def test_rate_above_the_ceiling_fails_with_the_measured_number(store):
 
     _mark(store, at=time.time() - 60, value=500)
     operator = RateCheckOperator(
-        task_id="dlq", state_key=STATE_KEY, measure=lambda: 600, max_rate=30
+        task_id="dlq",
+        state_variable=STATE_VARIABLE,
+        state_key=STATE_KEY,
+        measure=lambda: 600,
+        max_rate=30,
     )
     with pytest.raises(AirflowException) as failure:
         operator.execute(_context())
@@ -139,7 +177,11 @@ def test_a_threshold_arriving_as_a_rendered_string_is_still_a_number(store):
 
     _mark(store, at=time.time() - 60, value=1000)
     operator = RateCheckOperator(
-        task_id="rate", state_key=STATE_KEY, measure=lambda: 1010, min_rate="100"
+        task_id="rate",
+        state_variable=STATE_VARIABLE,
+        state_key=STATE_KEY,
+        measure=lambda: 1010,
+        min_rate="100",
     )
     with pytest.raises(AirflowException, match="below the 100/min floor"):
         operator.execute(_context())
@@ -150,24 +192,33 @@ def test_an_unset_threshold_renders_empty_and_means_no_limit(store):
 
     _mark(store, at=time.time() - 60, value=1000)
     operator = RateCheckOperator(
-        task_id="rate", state_key=STATE_KEY, measure=lambda: 1001, min_rate="", max_rate=""
+        task_id="rate",
+        state_variable=STATE_VARIABLE,
+        state_key=STATE_KEY,
+        measure=lambda: 1001,
+        min_rate="",
+        max_rate="",
     )
     assert operator.execute(_context())["rate_per_minute"] == pytest.approx(1, rel=0.1)
 
 
-def test_a_manual_run_measures_without_moving_the_mark(store):
-    # otherwise the next scheduled window collapses to the seconds since the manual trigger
+def test_the_operator_never_writes_the_state_variable_itself(store):
+    # several checks stage marks in parallel; one committer at the end of the run writes them
     import time
 
     _mark(store, at=time.time() - 60, value=1000)
-    _operator(measure=lambda: 1600).execute(_context(run_type="manual"))
-    assert json.loads(store.values[STATE_KEY])["value"] == 1000
+    context = _context()
+    _operator(measure=lambda: 1600).execute(context)
+    assert store.values[STATE_VARIABLE][STATE_KEY]["value"] == 1000
+    assert context["ti"].pushed["staged_marks"][STATE_KEY]["value"] == 1600
 
 
-def test_the_new_mark_is_stored_even_when_the_check_fails(store):
+def test_the_new_mark_is_staged_even_when_the_check_fails(store):
+    # one failed run must not leave the next one without a baseline
     import time
 
     _mark(store, at=time.time() - 60, value=1000)
+    context = _context()
     with pytest.raises(AirflowException):
-        _operator(measure=lambda: 1010, min_rate=100).execute(_context())
-    assert json.loads(store.values[STATE_KEY])["value"] == 1010
+        _operator(measure=lambda: 1010, min_rate=100).execute(context)
+    assert context["ti"].pushed["staged_marks"][STATE_KEY]["value"] == 1010

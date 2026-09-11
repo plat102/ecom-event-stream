@@ -12,6 +12,12 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__DEFAULT_TIMEZONE: UTC
+    # DAG schedules live in Variables so they are tunable from the UI, and a schedule is read
+    # while the file is parsed — this is the switch that keeps that from being a query per
+    # parse. Caching applies to DAG parsing only, never to task runs; the TTL is how long a
+    # schedule edited in the UI takes to take effect.
+    AIRFLOW__SECRETS__USE_CACHE: 'true'
+    AIRFLOW__SECRETS__CACHE_TTL_SECONDS: '60'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     # Every log_url in an alert is built from this, and the port published below is 18080.
     AIRFLOW__WEBSERVER__BASE_URL: http://localhost:18080

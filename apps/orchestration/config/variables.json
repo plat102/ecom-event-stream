@@ -1,24 +1,42 @@
 {
-  "KAFKA_LAG_THRESHOLD": "50000",
-  "KAFKA_MIN_THROUGHPUT": "100",
-  "KAFKA_MAX_DLQ_RATE": "30",
-  "KAFKA_CONSUMER_GROUPS": {
-    "sink": {
-      "conn_id": "kafka_sink",
-      "group": "mongo-sink",
-      "topic": "user-events",
-      "dlq_topic": "user-events-dlq"
+  "DAG_REGISTRY": {
+    "kafka_health_monitor": {
+      "schedule": "*/5 * * * *",
+      "config": "KAFKA_MONITOR_CONFIG",
+      "state": "KAFKA_MONITOR_STATE"
     },
-    "source": {
-      "conn_id": "kafka_source",
-      "group": "ingestion-bridge",
-      "topic": "product_view",
-      "timeout": 20
+    "spark_health_monitor": {
+      "schedule": "*/10 * * * *",
+      "config": "SPARK_MONITOR_CONFIG",
+      "state": "SPARK_MONITOR_STATE"
     }
   },
-  "YARN_MIN_HEALTHY_NODES": "1",
-  "YARN_MIN_AVAILABLE_MB": "1024",
-  "YARN_MIN_AVAILABLE_VCORES": "1",
-  "SPARK_APP_NAME": "ecom-stream-processor",
-  "DQ_MAX_STALENESS_MINUTES": "10"
+  "KAFKA_MONITOR_CONFIG": {
+    "lag_threshold": 50000,
+    "min_throughput": 100,
+    "max_dlq_rate": 30,
+    "clusters": {
+      "sink": {
+        "conn_id": "kafka_sink",
+        "group": "mongo-sink",
+        "topic": "user-events",
+        "dlq_topic": "user-events-dlq"
+      },
+      "source": {
+        "conn_id": "kafka_source",
+        "group": "ingestion-bridge",
+        "topic": "product_view",
+        "timeout": 20
+      }
+    }
+  },
+  "SPARK_MONITOR_CONFIG": {
+    "app_name": "ecom-stream-processor",
+    "min_healthy_nodes": 1,
+    "min_available_mb": 1024,
+    "min_available_vcores": 1,
+    "max_staleness_minutes": 10,
+    "freshness_scan_keys": 200000,
+    "min_row_growth": 100
+  }
 }

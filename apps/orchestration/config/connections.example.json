@@ -1,0 +1,48 @@
+{
+  "postgres_warehouse": {
+    "conn_type": "postgres",
+    "description": "Analytics warehouse — freshness, row growth and data quality queries",
+    "host": "postgresql",
+    "port": 5432,
+    "schema": "${POSTGRES_DB}",
+    "login": "${POSTGRES_USER}",
+    "password": "${POSTGRES_PASSWORD}"
+  },
+  "kafka_sink": {
+    "conn_type": "kafka",
+    "description": "Self-hosted 3-broker cluster; DOCKER_NETWORK listener, because EXTERNAL advertises localhost",
+    "extra": {
+      "bootstrap.servers": "kafka-0:9092,kafka-1:9092,kafka-2:9092",
+      "security.protocol": "SASL_PLAINTEXT",
+      "sasl.mechanism": "PLAIN",
+      "sasl.username": "${SINK_KAFKA_SASL_USERNAME}",
+      "sasl.password": "${SINK_KAFKA_SASL_PASSWORD}"
+    }
+  },
+  "kafka_source": {
+    "conn_type": "kafka",
+    "description": "Upstream cluster the bridge reads — watched for lag against the source topic retention",
+    "extra": {
+      "bootstrap.servers": "${SOURCE_KAFKA_BROKERS}",
+      "security.protocol": "${SOURCE_KAFKA_SECURITY_PROTOCOL}",
+      "sasl.mechanism": "${SOURCE_KAFKA_SASL_MECHANISM}",
+      "sasl.username": "${SOURCE_KAFKA_SASL_USERNAME}",
+      "sasl.password": "${SOURCE_KAFKA_SASL_PASSWORD}"
+    }
+  },
+  "yarn_rm": {
+    "conn_type": "http",
+    "description": "YARN ResourceManager REST API — cluster, node and application state",
+    "schema": "http",
+    "host": "resourcemanager",
+    "port": 8088
+  },
+  "discord_alert": {
+    "conn_type": "discord",
+    "description": "Alert webhook; the endpoint is validated against webhooks/{id}/{token}",
+    "host": "${DISCORD_API_BASE}",
+    "extra": {
+      "webhook_endpoint": "${DISCORD_WEBHOOK_ENDPOINT}"
+    }
+  }
+}

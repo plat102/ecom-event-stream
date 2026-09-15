@@ -1,4 +1,4 @@
-"""Airflow glue for the shared Kafka admin client: read a Connection, hand over its config."""
+"""Airflow glue for the shared Kafka admin client."""
 from airflow.hooks.base import BaseHook
 
 from shared.connectors.kafka_admin import KafkaAdminClient
@@ -16,6 +16,14 @@ class KafkaAdminHook(BaseHook):
         super().__init__()
         self.kafka_conn_id = kafka_conn_id
         self.timeout = timeout
+
+    @classmethod
+    def from_cluster(cls, cluster: dict, *, conn_id: str | None = None, timeout: float = 10.0):
+        """The one reading of a cluster entry, so the operator and the tasks cannot diverge."""
+        resolved = cluster.get("conn_id") or conn_id
+        if not resolved:
+            raise ValueError(f"cluster entry carries no conn_id: {sorted(cluster)}")
+        return cls(resolved, timeout=float(cluster.get("timeout", timeout)))
 
     def client_config(self) -> dict:
         conn = self.get_connection(self.kafka_conn_id)

@@ -20,7 +20,7 @@
         "python.defaultInterpreterPath": "/home/airflow/.local/bin/python",
         "python.analysis.extraPaths": [
           ".",
-          "apps/orchestration/plugins",
+          "apps/orchestration",
           "apps/ingestion/src",
           "apps/processing/src"
         ],

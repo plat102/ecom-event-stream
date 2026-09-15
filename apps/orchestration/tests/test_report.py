@@ -1,9 +1,28 @@
 """Unit tests for the run digest: what it always contains, and what it drops when the message
 would not fit."""
+from datetime import timedelta
+from decimal import Decimal
+
 import pytest
 
-from callbacks import report
-from callbacks.report import MESSAGE_LIMIT, build_report, describe
+from dec.callbacks import report
+from dec.callbacks.report import MESSAGE_LIMIT, build_report, describe, jsonable
+
+
+# ── jsonable ──────────────────────────────────────────────────────────
+
+
+def test_postgres_types_are_coerced_for_xcom():
+    # Decimal and timedelta come straight out of psycopg2 and neither is JSON
+    assert jsonable(Decimal("52.4")) == 52.4
+    assert jsonable(timedelta(minutes=3)) == 180.0
+    assert jsonable(None) is None
+    assert jsonable(True) is True
+
+
+def test_an_unknown_type_degrades_to_text_rather_than_breaking_the_push():
+    # a measurement reaching XCom matters more than its exact type: the digest only prints it
+    assert jsonable(object()).startswith("<object object")
 
 LOG_URL = "http://localhost:18080/log?task_id=check_sink_group_status"
 
@@ -28,7 +47,7 @@ def test_describe_leaves_the_error_out_of_the_measurement_line():
 
 
 def test_describe_drops_the_absolute_counter_behind_a_rate():
-    # 589/min is the story; offset 9683251 is not
+    # the rate is the story; the absolute offset behind it is not
     line = describe({"rate_per_minute": 589.05, "value": 9683251.0, "previous_value": 9676631.0})
     assert line == "rate_per_minute=589.05"
 
@@ -64,7 +83,7 @@ def test_a_failure_without_a_recorded_measurement_still_appears():
 
 
 def test_a_task_blocked_by_an_upstream_failure_says_so_without_a_log_link():
-    # its log is empty, and the link would cost ~130 characters of the budget
+    # its log is empty, and the link would cost a chunk of the budget
     report = _report([_row("compare_rates", "upstream_failed", None)])
     assert "upstream failed, did not run" in report
     assert LOG_URL not in report

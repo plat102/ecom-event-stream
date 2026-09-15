@@ -1,21 +1,18 @@
-"""One digest per DAG run instead of one alert per failed check — a single incident trips
-several at once. The write side lives here too: a check records what it measured under the
-`measured` XCom key *before* raising, so the digest can print numbers for a failed task.
-"""
+"""One digest per DAG run instead of one alert per failed check."""
 import logging
 from collections import Counter
+from datetime import timedelta
+from decimal import Decimal
 
-from callbacks.alert import send_to_discord
+from dec.callbacks.alert import send_to_discord
 
 log = logging.getLogger(__name__)
 
 MEASURED_KEY = "measured"
-
-# Discord rejects longer messages, and the hook raises before it ever sends one.
 MESSAGE_LIMIT = 2000
 UPSTREAM_FAILED = "upstream_failed"
 FAILED_STATES = ("failed", UPSTREAM_FAILED)
-# Kept out of the digest: keys a sibling already implies, on a 2000-character budget.
+# Kept out of the digest: keys a sibling already implies.
 NOISY_KEYS = (
     "value",
     "previous_value",
@@ -26,8 +23,19 @@ NOISY_KEYS = (
     "expected",
     "present",
 )
-# Worst first: a reader scanning the top of the message should see the problems.
+# Worst first, so a reader scanning the top sees the problems.
 STATE_ORDER = {"failed": 0, "upstream_failed": 1, "skipped": 2, "success": 3}
+
+
+def jsonable(value):
+    """XCom is JSON, and Postgres hands back Decimal and timedelta."""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, timedelta):
+        return value.total_seconds()
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
 
 
 def describe(measured: dict | None) -> str:
@@ -41,8 +49,7 @@ def describe(measured: dict | None) -> str:
 def build_report(
     *, dag_id: str, logical_date: str, rows: list[dict], limit: int = MESSAGE_LIMIT
 ) -> str:
-    """One row per task: `task_id`, `state`, optional `measured` and `log_url`. Failures are
-    never trimmed, measurements are — a message Discord refuses is worse than a short one."""
+    """One row per task; failures are never trimmed, measurements are."""
     counts = Counter(row.get("state") or "no_state" for row in rows)
     head = [
         f"**{dag_id}** · {logical_date}",
@@ -62,8 +69,7 @@ def build_report(
                 "upstream failed, did not run" if blocked else "no reason recorded"
             )
             head.append(f"• `{row['task_id']}` — {reason}")
-            # No log link for a task that never ran: the log is empty and the line is ~130
-            # characters of the budget.
+            # No log link for a task that never ran: the log is empty and the line costs.
             if row.get("log_url") and not blocked:
                 head.append(f"  {row['log_url']}")
 
@@ -80,8 +86,7 @@ def build_report(
             tail.append(f"… {dropped} more line(s) trimmed to fit")
         report = "\n".join(head + tail)
         if len(report) <= limit or not measured:
-            # A wide outage can fill the budget with failures alone, and a message the
-            # webhook refuses is no report at all — so the hard cut is last, not optional.
+            # A message the webhook refuses is no report at all, so the hard cut is last.
             return report if len(report) <= limit else report[: limit - 1] + "…"
         measured.pop()
         dropped += 1
@@ -94,8 +99,8 @@ def record(context, measured: dict) -> dict:
 
 
 def fail(context, measured: dict, message: str) -> None:
-    """Record the numbers *and* the reason, then fail. Airflow is imported inside so
-    `build_report` stays testable without it, as `alert.py` does for the Discord hook."""
+    """Record the numbers and the reason, then fail."""
+    # Imported here so `build_report` stays testable without airflow.
     from airflow.exceptions import AirflowException
 
     record(context, {**measured, "error": message})
@@ -113,15 +118,13 @@ def collect_rows(context) -> list[dict]:
             "log_url": other.log_url,
         }
         for other in dag_run.get_task_instances()
-        # Skip this task and anything still stateless — the run-state marker sits downstream
-        # of the report, so it has not started yet and would count as its own category.
+        # Skip this task and anything still stateless, which sits downstream of the report.
         if other.task_id != task_instance.task_id and other.state
     ]
 
 
 def send_run_report(context) -> str:
-    """Sends unguarded: this task carries the failure callback, so an undeliverable digest
-    must not pass silently."""
+    """Sends unguarded: this task carries the failure callback."""
     report = build_report(
         dag_id=context["dag_run"].dag_id,
         logical_date=context["logical_date"].strftime("%Y-%m-%d %H:%M UTC"),
@@ -139,9 +142,7 @@ def failed_task_ids(context) -> list[str]:
 
 
 def fail_run_if_checks_failed(context) -> None:
-    """Colour the run red — the digest already said what broke. Without it the report task,
-    succeeding on ALL_DONE as the only leaf, makes every run green however many checks failed.
-    """
+    """Without it the report task, succeeding as the only leaf, makes every run green."""
     failed = failed_task_ids(context)
     if failed:
         from airflow.exceptions import AirflowException

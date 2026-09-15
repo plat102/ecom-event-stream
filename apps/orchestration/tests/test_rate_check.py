@@ -9,9 +9,9 @@ pytest.importorskip("airflow", reason="airflow is only installed in the Airflow 
 
 from airflow.exceptions import AirflowException, AirflowSkipException
 
-import marks
+from dec import marks
 
-from operators.rate_check import RateCheckOperator, rate_per_minute
+from dec.operators.rate_check import RateCheckOperator, rate_per_minute
 
 STATE_VARIABLE = "TEST_MONITOR_STATE"
 STATE_KEY = "throughput.sink"
@@ -163,8 +163,8 @@ def test_rate_above_the_ceiling_fails_with_the_measured_number(store):
     assert "100/min" in str(failure.value) and "100 new" in str(failure.value)
 
 
-def test_a_threshold_arriving_as_a_rendered_string_is_still_a_number(store):
-    # thresholds come from a Variable through a Jinja template, so they arrive as text
+def test_a_threshold_arriving_as_text_is_still_a_number(store):
+    # thresholds come from hand-edited JSON in a Variable, so "100" and 100 must behave alike
     _mark(store, at=time.time() - 60, value=1000)
     operator = RateCheckOperator(
         task_id="rate",
@@ -177,17 +177,48 @@ def test_a_threshold_arriving_as_a_rendered_string_is_still_a_number(store):
         operator.execute(_context())
 
 
-def test_an_unset_threshold_renders_empty_and_means_no_limit(store):
+@pytest.mark.parametrize("unset", [None, ""])
+def test_an_unset_threshold_means_no_limit(store, unset):
+    # absent from the config Variable, or rendered from a blank one: "no floor", not "floor 0"
     _mark(store, at=time.time() - 60, value=1000)
     operator = RateCheckOperator(
         task_id="rate",
         state_variable=STATE_VARIABLE,
         state_key=STATE_KEY,
         measure=lambda: 1001,
-        min_rate="",
-        max_rate="",
+        min_rate=unset,
+        max_rate=unset,
     )
     assert operator.execute(_context())["rate_per_minute"] == pytest.approx(1, rel=0.1)
+
+
+def test_a_threshold_that_is_not_a_number_names_the_key_to_fix(store):
+    # Jinja renders whatever the Variable holds; a typo there must not read as a rate fault
+    _mark(store, at=time.time() - 60, value=1000)
+    operator = _operator(measure=lambda: 1010, min_rate="one hundred")
+    with pytest.raises(AirflowException, match="min_rate rendered to 'one hundred'"):
+        operator.execute(_context())
+
+
+def test_the_config_parameters_are_templated(store):
+    # the operator is built once at parse time, so a floor retuned in the UI only takes effect
+    # because Airflow re-renders these fields for every task instance
+    assert set(RateCheckOperator.template_fields) == {
+        "state_variable",
+        "state_key",
+        "min_rate",
+        "max_rate",
+    }
+
+
+def test_a_rendered_threshold_is_applied_to_the_run_that_rendered_it(store):
+    # what the renderer hands execute() is text, and two runs can be handed different text
+    _mark(store, at=time.time() - 60, value=1000)
+    with pytest.raises(AirflowException, match="below the 100/min floor"):
+        _operator(measure=lambda: 1010, min_rate="100").execute(_context())
+    assert _operator(measure=lambda: 1010, min_rate="1").execute(_context())[
+        "rate_per_minute"
+    ] == pytest.approx(10, rel=0.1)
 
 
 def test_the_operator_never_writes_the_state_variable_itself(store):

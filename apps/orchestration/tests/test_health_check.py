@@ -8,8 +8,8 @@ pytest.importorskip("airflow", reason="airflow is only installed in the Airflow 
 
 from airflow.exceptions import AirflowException
 
-from operators import health_check
-from operators.health_check import (
+from dec.operators import health_check
+from dec.operators.health_check import (
     HealthCheckOperator,
     KafkaHealthCheckOperator,
     SparkHealthCheckOperator,
@@ -112,30 +112,38 @@ def test_a_failing_check_records_its_measurements_and_the_reason():
 # ── the bound hooks ───────────────────────────────────────────────────
 
 
-def test_the_kafka_flavour_reads_its_connection_and_timeout_at_run_time():
-    # both are templated so the cluster map in a Variable supplies them per run
-    assert "conn_id" in KafkaHealthCheckOperator.template_fields
-    assert "timeout" in KafkaHealthCheckOperator.template_fields
+@pytest.fixture()
+def built(monkeypatch):
+    """Record what the operator asks the hook for, without needing a Connection."""
+    seen = []
+
+    def get_conn(hook):
+        seen.append((hook.kafka_conn_id, hook.timeout))
+        return FakeClient()
+
+    monkeypatch.setattr(health_check.KafkaAdminHook, "get_conn", get_conn)
+    return seen
 
 
-def test_the_kafka_flavour_passes_a_rendered_string_timeout_as_a_number(monkeypatch):
-    seen = {}
-
-    class FakeHook:
-        default_conn_name = "kafka_sink"
-
-        def __init__(self, conn_id, timeout):
-            seen.update(conn_id=conn_id, timeout=timeout)
-
-        def get_conn(self):
-            return FakeClient()
-
-    monkeypatch.setattr(health_check, "KafkaAdminHook", FakeHook)
+def test_the_cluster_entry_is_templated(built):
+    # the cluster map lives in a Variable, and Airflow renders these per task instance, so a
+    # cluster repointed there takes effect without a deploy
+    assert "cluster" in KafkaHealthCheckOperator.template_fields
+    # what execute() is handed is the rendered dict, never a reader
     operator = KafkaHealthCheckOperator(
-        task_id="check", conn_id="kafka_source", timeout="20", probe=lambda c: {}
+        task_id="check", cluster={"conn_id": "kafka_source", "timeout": "20"}, probe=lambda c: {}
     )
     operator.execute(_context())
-    assert seen == {"conn_id": "kafka_source", "timeout": 20.0}
+    assert built == [("kafka_source", 20.0)]
+
+
+def test_a_cluster_without_a_timeout_falls_back_to_the_operator_default(built):
+    # how the cluster entry itself is read is the hook's contract, tested next to the hook
+    operator = KafkaHealthCheckOperator(
+        task_id="check", cluster={"conn_id": "kafka_sink"}, probe=lambda c: {}
+    )
+    operator.execute(_context())
+    assert built == [("kafka_sink", 10.0)]
 
 
 def test_the_yarn_flavour_does_not_try_to_close_a_stateless_client(monkeypatch):
@@ -159,14 +167,15 @@ def test_the_yarn_flavour_does_not_try_to_close_a_stateless_client(monkeypatch):
     assert operator.execute(_context()) == {"ok": True}
 
 
-def test_a_subclass_reading_a_template_field_must_override_measure():
-    """The regression this guards: `probe=self._run_query` reads the pre-render copy.
+def test_a_subclass_can_replace_the_probe_call_entirely():
+    # a check that is more than one probe call overrides `measure` rather than passing a probe
+    class TwoStepCheck(HealthCheckOperator):
+        def client(self):
+            return FakeClient()
 
-    Airflow copies the operator before rendering templates onto it, so a bound method stored
-    in `probe` still points at the original — and a check would run raw Jinja as SQL.
-    """
-    from operators.sql_check import SqlCheckOperator
+        def measure(self, client) -> dict:
+            return {"steps": 2}
 
-    operator = SqlCheckOperator(task_id="check", sql="SELECT 1")
+    operator = TwoStepCheck(task_id="check")
     assert operator.probe is None
-    assert type(operator).measure is not HealthCheckOperator.measure
+    assert operator.execute(_context()) == {"steps": 2}

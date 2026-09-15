@@ -21,7 +21,7 @@ streamlit = "^1.60.0"
 
 
 [tool.pytest.ini_options]
-pythonpath = [".", "apps/ingestion/src", "apps/processing/src", "apps/orchestration/plugins", "apps/orchestration/dags"]
+pythonpath = [".", "apps/ingestion/src", "apps/processing/src", "apps/orchestration", "apps/orchestration/dags"]
 testpaths = ["apps"]
 
 [tool.ruff]

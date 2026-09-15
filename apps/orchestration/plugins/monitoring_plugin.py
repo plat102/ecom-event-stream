@@ -1,11 +1,10 @@
-"""Registers the monitoring hooks for Admin -> Plugins; Airflow 2 has no such step for
-operators, which are imported from this directory directly."""
+"""The one thing Airflow must discover here; everything else lives in `dec` and is imported."""
 from airflow.plugins_manager import AirflowPlugin
-from hooks.kafka_admin import KafkaAdminHook
-from hooks.warehouse import WarehouseHook
-from hooks.yarn import YarnHook
+
+from dec.links import YarnResourceManagerLink
 
 
 class MonitoringPlugin(AirflowPlugin):
-    name = "ecom_monitoring"
-    hooks = [KafkaAdminHook, YarnHook, WarehouseHook]
+    name = "monitoring"
+    # Without this the webserver cannot deserialise the link off a task and drops it.
+    operator_extra_links = [YarnResourceManagerLink()]

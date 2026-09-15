@@ -1,13 +1,15 @@
-"""Turn two observations into a per-minute rate. Throughput and processing rate are
-derivatives, so the earlier mark must outlive the process that took it — hence the Variable.
-"""
+"""Turn two observations into a per-minute rate; the earlier mark lives in a Variable."""
 import time
 from collections.abc import Callable
 
 from airflow.exceptions import AirflowException, AirflowSkipException
 from airflow.models import BaseOperator
 
-from marks import read_mark, stage_mark
+from dec.callbacks.report import fail, record
+from dec.marks import read_mark, stage_mark
+
+# Templated, so a threshold reaches execute() as text.
+Threshold = float | str | None
 
 
 def rate_per_minute(previous: dict, current: dict) -> float:
@@ -18,16 +20,12 @@ def rate_per_minute(previous: dict, current: dict) -> float:
 
 
 class RateCheckOperator(BaseOperator):
-    """Measures a monotonic counter, stores the mark, compares it with the previous one.
-    The first run skips, and so does a counter that moved backwards — that rate would be
-    meaningless, not low. Thresholds are templated so a Variable supplies them at run time.
+    """Measures a monotonic counter against the previous mark, skipping a meaningless rate."""
 
-    A window outside [`min_interval_seconds`, `max_interval_seconds`] skips too: a run
-    triggered by hand seconds after a scheduled one divides a handful of messages by a handful
-    of seconds, and a mark left behind by an outage divides one interval's work by hours.
-    """
-
-    template_fields = ("min_rate", "max_rate")
+    # Config, so it is templated and the run's real threshold shows in Rendered Template.
+    # `measure` stays a callable: it is logic, not a value.
+    template_fields = ("state_variable", "state_key", "min_rate", "max_rate")
+    ui_color = "#e8f4f8"
 
     def __init__(
         self,
@@ -35,8 +33,8 @@ class RateCheckOperator(BaseOperator):
         state_variable: str,
         state_key: str,
         measure: Callable[[], float],
-        min_rate: float | str | None = None,
-        max_rate: float | str | None = None,
+        min_rate: Threshold = None,
+        max_rate: Threshold = None,
         min_interval_seconds: float = 60.0,
         max_interval_seconds: float | None = None,
         **kwargs,
@@ -50,14 +48,18 @@ class RateCheckOperator(BaseOperator):
         self.min_interval_seconds = min_interval_seconds
         self.max_interval_seconds = max_interval_seconds
 
-    @staticmethod
-    def _threshold(value) -> float | None:
-        """A rendered template arrives as a string, an unset Variable as an empty one."""
-        return None if value is None or value == "" else float(value)
-
-    def _record(self, context, measured: dict) -> None:
-        """The run report reads this key, so a failed check still contributes its numbers."""
-        context["ti"].xcom_push(key="measured", value=measured)
+    def _threshold(self, value: Threshold, name: str) -> float | None:
+        """A rendered field arrives as text; an unset one as None or an empty string."""
+        if value is None or value == "":
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            # Jinja renders whatever the Variable holds, so say which key to go and fix.
+            raise AirflowException(
+                f"{name} rendered to {value!r}, which is not a number — fix the key it "
+                f"reads in the DAG's config Variable"
+            ) from None
 
     def execute(self, context) -> dict:
         current = {"at": time.time(), "value": float(self.measure())}
@@ -66,16 +68,13 @@ class RateCheckOperator(BaseOperator):
         stage_mark(context, self.state_key, current)
 
         if previous is None:
-            self._record(context, {"value": current["value"], "error": "first mark stored"})
+            record(context, {"value": current["value"], "error": "first mark stored"})
             raise AirflowSkipException(
                 f"no earlier mark under {self.state_key!r} yet — measured {current['value']:.0f}"
             )
 
         if current["value"] < previous["value"]:
-            self._record(
-                context,
-                {"value": current["value"], "error": "counter reset, no rate this run"},
-            )
+            record(context, {"value": current["value"], "error": "counter reset, no rate this run"})
             raise AirflowSkipException(
                 f"counter moved backwards ({previous['value']:.0f} to {current['value']:.0f}) "
                 "— treating as a reset, not a rate"
@@ -83,15 +82,15 @@ class RateCheckOperator(BaseOperator):
 
         elapsed = current["at"] - previous["at"]
         if elapsed < self.min_interval_seconds:
-            self._record(context, {"value": current["value"], "error": "window too short"})
+            # Too little has happened for the quotient to be a rate rather than noise.
+            record(context, {"value": current["value"], "error": "window too short"})
             raise AirflowSkipException(
                 f"only {elapsed:.0f}s since the last mark, under the "
                 f"{self.min_interval_seconds:.0f}s a rate needs to mean anything"
             )
         if self.max_interval_seconds is not None and elapsed > self.max_interval_seconds:
-            # The task was skipped or the DAG was down in between, so the mark predates the
-            # gap. Averaging one interval's work over that window reads as a slowdown.
-            self._record(context, {"value": current["value"], "error": "window too long"})
+            # The mark predates a gap, so the average would read as a slowdown.
+            record(context, {"value": current["value"], "error": "window too long"})
             raise AirflowSkipException(
                 f"{elapsed:.0f}s since the last mark, over the "
                 f"{self.max_interval_seconds:.0f}s this rate is comparable across — the mark "
@@ -103,22 +102,20 @@ class RateCheckOperator(BaseOperator):
             "rate_per_minute": round(rate, 2),
             "value": current["value"],
             "previous_value": previous["value"],
-            "interval_seconds": round(current["at"] - previous["at"], 1),
+            "interval_seconds": round(elapsed, 1),
         }
         window = f"{rate:.0f}/min over the last {result['interval_seconds']:.0f}s"
-        minimum, maximum = self._threshold(self.min_rate), self._threshold(self.max_rate)
+        minimum = self._threshold(self.min_rate, "min_rate")
+        maximum = self._threshold(self.max_rate, "max_rate")
         if minimum is not None and rate < minimum:
-            message = f"{self.state_key}: {window}, below the {minimum:.0f}/min floor"
-            self._record(context, {**result, "error": message})
-            raise AirflowException(message)
+            fail(context, result, f"{self.state_key}: {window}, below the {minimum:.0f}/min floor")
         if maximum is not None and rate > maximum:
-            message = (
+            fail(
+                context,
+                result,
                 f"{self.state_key}: {window} "
                 f"({result['value'] - result['previous_value']:.0f} new), "
-                f"above the {maximum:.0f}/min ceiling"
+                f"above the {maximum:.0f}/min ceiling",
             )
-            self._record(context, {**result, "error": message})
-            raise AirflowException(message)
-        self._record(context, result)
         self.log.info("rate: %s", result)
-        return result
+        return record(context, result)

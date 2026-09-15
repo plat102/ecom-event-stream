@@ -8,8 +8,8 @@ import pytest
 
 pytest.importorskip("airflow", reason="airflow is only installed in the Airflow image")
 
-import marks
-from marks import commit_marks, read_mark, stage_mark
+from dec import marks
+from dec.marks import commit_marks, read_mark, stage_mark
 
 STATE_VARIABLE = "KAFKA_MONITOR_STATE"
 

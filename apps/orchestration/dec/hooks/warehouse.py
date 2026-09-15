@@ -1,6 +1,4 @@
-"""Airflow glue for the shared Postgres client, which only reads attributes off whatever it
-is handed — so no second client, and no SQL through `PostgresHook`, in the DAGs.
-"""
+"""Airflow glue for the shared Postgres client, which only reads attributes off what it gets."""
 from types import SimpleNamespace
 
 from airflow.hooks.base import BaseHook

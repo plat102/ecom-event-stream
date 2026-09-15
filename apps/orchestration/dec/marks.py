@@ -1,8 +1,8 @@
-"""Run-to-run marks: the earlier observation a rate or a trend is compared against.
+"""A mark is the previous reading of a measurement, left behind by an earlier run of this DAG.
 
-Two rules. **Only a scheduled run moves a mark** — a manual trigger reads the history but must
-not disturb it. **Marks are staged on XCom and committed once per run**, because several tasks
-produce marks in parallel and each writing the shared Variable would drop all but the last.
+Checks compare against it for a rate, or to catch a value that has not moved in two runs. Not a
+watermark: it bounds no data. Tasks stage marks on XCom;
+`commit_marks` is the single writer that lands them in the DAG's state Variable at the end of the run.
 """
 import json
 import logging
@@ -28,7 +28,7 @@ def read_mark(state_variable: str, key: str):
 
 
 def stage_mark(context, key: str, value) -> None:
-    """Hand a mark to the end-of-run committer, merging with any this task already staged."""
+    """Hand a mark to the end-of-run committer, merging with any already staged here."""
     task_instance = context["ti"]
     staged = dict(task_instance.xcom_pull(task_ids=task_instance.task_id, key=STAGED_KEY) or {})
     staged[key] = value
@@ -49,7 +49,7 @@ def collect_staged(context) -> dict:
 
 
 def commit_marks(context, state_variable: str) -> dict:
-    """The single writer. Merges, so a check that staged nothing keeps its previous mark."""
+    """The single writer; a manual run reads the history but must not disturb it."""
     staged = collect_staged(context)
     if not is_scheduled(context):
         log.info("run is not scheduled — %d staged mark(s) read but not committed", len(staged))
@@ -57,6 +57,7 @@ def commit_marks(context, state_variable: str) -> dict:
     if not staged:
         log.info("no marks staged this run, leaving %s untouched", state_variable)
         return {}
+    # Merged, so a check that staged nothing keeps its previous mark.
     Variable.set(state_variable, json.dumps({**read_state(state_variable), **staged}))
     log.info("committed %d mark(s) to %s: %s", len(staged), state_variable, sorted(staged))
     return staged

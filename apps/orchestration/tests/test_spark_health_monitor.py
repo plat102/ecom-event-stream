@@ -10,8 +10,9 @@ pytest.importorskip("airflow", reason="airflow is only installed in the Airflow 
 
 from airflow.exceptions import AirflowException
 
-import dag_config
+from dec import dag_config
 import spark_health_monitor as dag_module
+from dec.monitoring.probes import spark as probes
 from shared.connectors.yarn import YarnApp, YarnNode
 
 APP_NAME = "ecom-stream-processor"
@@ -20,6 +21,8 @@ CONFIG = {
     "min_healthy_nodes": 1,
     "min_available_mb": 1024,
     "min_available_vcores": 1,
+    "freshness_scan_keys": 200000,
+    "max_staleness_minutes": 10,
 }
 DAG_SOURCE = pathlib.Path(dag_module.__file__).read_text()
 
@@ -107,7 +110,7 @@ def run_task(task_id, measured, context=None):
 
 
 def test_started_and_active_master_passes():
-    measured = dag_module.probe_cluster_master(
+    measured = probes.cluster_master(
         FakeYarn(info={"state": "STARTED", "haState": "ACTIVE", "resourceManagerVersion": "3.3.6"})
     )
     assert measured["rm_version"] == "3.3.6"
@@ -116,7 +119,7 @@ def test_started_and_active_master_passes():
 
 def test_standby_master_fails_and_says_so():
     # a STANDBY ResourceManager answers the REST call but schedules nothing
-    measured = dag_module.probe_cluster_master(
+    measured = probes.cluster_master(
         FakeYarn(info={"state": "STARTED", "haState": "STANDBY"})
     )
     with pytest.raises(AirflowException, match="haState=STANDBY"):
@@ -236,35 +239,33 @@ def test_one_running_job_is_the_expected_state():
 # ── the output half ───────────────────────────────────────────────────
 
 
-def _row(scanned_rows=1000, staleness=2.0, limit=10.0) -> dict:
+def _meta(result=2.0, max_threshold=10.0) -> dict:
+    """What the provider operator hands `push`, minus the keys the digest drops."""
     return {
-        "scanned_rows": scanned_rows,
-        "staleness_minutes": staleness,
-        "limit_minutes": limit,
+        "result": result,
+        "min_threshold": 0.0,
+        "max_threshold": max_threshold,
+        "within_threshold": 0.0 <= result <= max_threshold,
     }
 
 
-def test_recent_write_is_fresh():
-    assert dag_module.is_fresh(_row(staleness=2.0))
+def test_freshness_is_bounded_below_as_well_as_above():
+    # a negative staleness would mean a row stamped in the future, which is a clock fault
+    freshness = check("check_fact_freshness")
+    assert freshness.min_threshold == 0
+    assert freshness.max_threshold == "{{ var.json.SPARK_MONITOR_CONFIG.max_staleness_minutes }}"
 
 
-def test_a_write_exactly_at_the_limit_is_still_fresh():
-    assert dag_module.is_fresh(_row(staleness=10.0, limit=10.0))
+def test_an_empty_window_reads_as_maximally_stale_not_as_null():
+    # MAX() over no rows is NULL, and NULL cannot be compared to a threshold at all
+    assert f"{dag_module.NO_WRITES_SENTINEL}" in dag_module.FRESHNESS_SQL
+    assert dag_module.NO_WRITES_SENTINEL > 10  # comfortably past any plausible limit
 
 
-def test_a_stale_write_is_not_fresh():
-    assert not dag_module.is_fresh(_row(staleness=42.0))
-
-
-def test_an_empty_window_is_not_fresh():
-    # MAX() over no rows is NULL, so staleness cannot be compared — absence is the answer
-    assert not dag_module.is_fresh(_row(scanned_rows=0, staleness=None))
-
-
-def test_the_freshness_failure_carries_every_measured_number():
+def test_the_freshness_failure_carries_the_measured_number():
     message = check("check_fact_freshness").message
-    assert message.format(**_row(scanned_rows=0, staleness=None, limit=10.0)).startswith(
-        "fact_event: 0 row(s) in the scanned window, last write None minutes ago (limit 10.0)"
+    assert message.format(**_meta(result=42.0)).startswith(
+        "fact_event: last write 42.0 minutes ago (limit 10.0)"
     )
 
 
@@ -291,16 +292,19 @@ def test_freshness_is_measured_on_the_warehouse_clock():
 
 
 def test_nothing_compares_against_todays_date():
-    # the generator replays ~30 hours behind and never catches up with the wall clock
+    # the generator replays the past and never catches up with the wall clock
     assert "CURRENT_DATE" not in DAG_SOURCE
 
 
-def test_the_staleness_limit_is_read_from_the_config_variable_at_run_time():
-    assert dag_module.SETTINGS.template("max_staleness_minutes") in dag_module.FRESHNESS_SQL
+def test_no_variable_becomes_a_fragment_of_the_query():
+    # the provider operator runs `sql` with no bind parameters, so the scan window is a
+    # literal in code and the only value from a Variable is the numeric threshold
+    assert f"- {dag_module.FRESHNESS_SCAN_KEYS}" in dag_module.FRESHNESS_SQL
+    assert "{{" not in dag_module.FRESHNESS_SQL
 
 
 def test_the_freshness_scan_is_bounded_by_the_primary_key():
-    # unbounded, MAX(ingested_at) is a parallel seq scan: 7.5s at 10M rows and growing
+    # unbounded, MAX(ingested_at) would be a parallel seq scan over a growing table
     assert "event_key > (SELECT MAX(event_key) FROM fact_event)" in dag_module.FRESHNESS_SQL
 
 

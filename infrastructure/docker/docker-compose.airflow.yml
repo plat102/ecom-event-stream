@@ -22,7 +22,7 @@ x-airflow-common: &airflow-common
     # Every log_url in an alert is built from this, and the port published below is 18080.
     AIRFLOW__WEBSERVER__BASE_URL: http://localhost:18080
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
-    PYTHONPATH: /opt/repo
+    PYTHONPATH: /opt/repo:/opt/repo/apps/orchestration
     # An env var beats .env in pydantic-settings, so these override its localhost defaults.
     POSTGRES_HOST: postgresql
     POSTGRES_PORT: 5432
@@ -33,7 +33,7 @@ x-airflow-common: &airflow-common
     - ../../apps/orchestration/plugins:/opt/airflow/plugins
     - ../../apps/orchestration/config:/opt/airflow/config
     - ../../apps/orchestration/logs:/opt/airflow/logs
-    # Read-only repo: plugins import the shared connectors from here.
+    # Read-only repo: the shared connectors are imported from here.
     - ../..:/opt/repo:ro
   user: "${AIRFLOW_UID:-50000}:0"
   networks:

@@ -46,7 +46,7 @@ def _to_df(spark, rows):
 
 def test_event_timestamp_comes_from_the_epoch_not_local_time(spark):
     """local_time reads 20:39:40 but the instant is 13:39:40 UTC. Taking local_time at face
-    value put every timestamp 7 hours late — see bugs/003."""
+    value put every timestamp 7 hours late."""
     df = _to_df(spark, [BASE_ROW])
     row = enrich(df).collect()[0]
 

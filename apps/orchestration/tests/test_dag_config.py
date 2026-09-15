@@ -5,8 +5,8 @@ import pytest
 
 pytest.importorskip("airflow", reason="airflow is only installed in the Airflow image")
 
-import dag_config
-from dag_config import DagSettings, default_names, for_dag
+from dec import dag_config
+from dec.dag_config import DagSettings, default_names, for_dag
 
 DAG_ID = "spark_health_monitor"
 DEFAULT = "*/10 * * * *"
@@ -71,17 +71,18 @@ def _settings() -> DagSettings:
     return DagSettings(DEFAULT, "SPARK_MONITOR_CONFIG", "SPARK_MONITOR_STATE")
 
 
-def test_a_template_defers_the_read_to_run_time():
+def test_a_template_defers_the_read_to_render_time(store):
+    # operators are built once per parse; a threshold edited in the UI must still take effect.
+    # Airflow renders the string per task instance, so the read never happens at parse
     assert _settings().template("min_row_growth") == (
         "{{ var.json.SPARK_MONITOR_CONFIG.min_row_growth }}"
     )
 
 
-def test_a_template_can_reach_a_nested_key():
-    # the cluster map is one key of the config, not a Variable of its own any more
-    assert _settings().template("clusters.sink.conn_id") == (
-        "{{ var.json.SPARK_MONITOR_CONFIG.clusters.sink.conn_id }}"
-    )
+def test_the_cluster_map_is_one_key_of_the_config(store):
+    # not a Variable of its own any more
+    store.values["SPARK_MONITOR_CONFIG"] = {"clusters": {"sink": {"conn_id": "kafka_sink"}}}
+    assert _settings().value("clusters")["sink"]["conn_id"] == "kafka_sink"
 
 
 def test_a_value_read_inside_a_task_comes_from_the_config_variable(store):

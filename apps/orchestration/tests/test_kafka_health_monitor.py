@@ -144,15 +144,15 @@ def test_a_missing_dlq_is_reported_by_name():
     # silent otherwise: nothing notices until the first event needs rejecting
     measured = dag_module.probe_sink_topics(FakeKafka(topics=["user-events"]))
     assert measured["missing"] == ["user-events-dlq"]
-    operator = check("check_topics_exist")
+    operator = check("sink.check_topics_exist")
     assert not operator.predicate(measured)
     assert "user-events-dlq" in operator.message.format(**measured)
 
 
 def test_listing_topics_doubles_as_the_connectivity_check():
     # no predicate: the call either returned or raised
-    assert check("check_sink_brokers").predicate is None
-    assert check("check_sink_brokers").retries == 3
+    assert check("sink.check_brokers").predicate is None
+    assert check("sink.check_brokers").retries == 3
 
 
 # ── consumer group status ─────────────────────────────────────────────
@@ -160,20 +160,20 @@ def test_listing_topics_doubles_as_the_connectivity_check():
 
 def test_a_stable_group_with_members_is_consuming(monkeypatch, store):
     with_client(monkeypatch, FakeKafka(status=status("STABLE")))
-    measured = task("check_sink_group_status")("sink", **_context())
+    measured = task("sink.check_group_status")("sink", **_context())
     assert measured["state"] == "STABLE" and measured["members"] == 1
 
 
 def test_an_empty_group_fails_and_names_the_topic(monkeypatch, store):
     with_client(monkeypatch, FakeKafka(status=status("EMPTY", members=0)))
     with pytest.raises(AirflowException) as failure:
-        task("check_sink_group_status")("sink", **_context())
+        task("sink.check_group_status")("sink", **_context())
     assert "mongo-sink" in str(failure.value) and "user-events" in str(failure.value)
 
 
 def test_a_first_rebalance_is_transient_not_an_incident(monkeypatch, store):
     with_client(monkeypatch, FakeKafka(status=status("PREPARING_REBALANCING")))
-    measured = task("check_sink_group_status")("sink", **_context())
+    measured = task("sink.check_group_status")("sink", **_context())
     assert measured["state"] == "PREPARING_REBALANCING"
 
 
@@ -182,13 +182,13 @@ def test_a_rebalance_lasting_across_two_runs_fails(monkeypatch, store):
     _mark(store, "group_state.mongo-sink", "PREPARING_REBALANCING")
     with_client(monkeypatch, FakeKafka(status=status("COMPLETING_REBALANCING")))
     with pytest.raises(AirflowException, match="across two runs"):
-        task("check_sink_group_status")("sink", **_context())
+        task("sink.check_group_status")("sink", **_context())
 
 
 def test_the_group_state_is_staged_for_the_next_run(monkeypatch, store):
     with_client(monkeypatch, FakeKafka(status=status("STABLE")))
     context = _context()
-    task("check_sink_group_status")("sink", **context)
+    task("sink.check_group_status")("sink", **context)
     assert context["ti"].pushed["staged_marks"]["group_state.mongo-sink"] == "STABLE"
 
 
@@ -197,14 +197,14 @@ def test_the_group_state_is_staged_for_the_next_run(monkeypatch, store):
 
 def test_lag_under_the_threshold_passes(monkeypatch, store):
     with_client(monkeypatch, FakeKafka(lag=lag(25)))
-    assert task("check_sink_consumer_lag")("sink", **_context())["lag"] == 25
+    assert task("sink.check_consumer_lag")("sink", **_context())["lag"] == 25
 
 
 def test_lag_over_the_threshold_but_draining_does_not_alert(monkeypatch, store):
     # one breach is a sink restart; the judgement is the direction, not the number
     _mark(store, "lag.mongo-sink", {"at": 0, "total": 90000})
     with_client(monkeypatch, FakeKafka(lag=lag(60000)))
-    measured = task("check_sink_consumer_lag")("sink", **_context())
+    measured = task("sink.check_consumer_lag")("sink", **_context())
     assert measured["draining_from"] == 90000
 
 
@@ -212,7 +212,7 @@ def test_lag_over_the_threshold_and_not_draining_fails(monkeypatch, store):
     _mark(store, "lag.mongo-sink", {"at": 0, "total": 60000})
     with_client(monkeypatch, FakeKafka(lag=lag(60001)))
     with pytest.raises(AirflowException) as failure:
-        task("check_sink_consumer_lag")("sink", **_context())
+        task("sink.check_consumer_lag")("sink", **_context())
     assert "not draining" in str(failure.value) and "60001" in str(failure.value)
 
 
@@ -221,20 +221,20 @@ def test_lag_stuck_at_exactly_the_previous_value_fails(monkeypatch, store):
     _mark(store, "lag.mongo-sink", {"at": 0, "total": 60000})
     with_client(monkeypatch, FakeKafka(lag=lag(60000)))
     with pytest.raises(AirflowException, match="not draining"):
-        task("check_sink_consumer_lag")("sink", **_context())
+        task("sink.check_consumer_lag")("sink", **_context())
 
 
 def test_a_first_breach_with_no_earlier_mark_fails(monkeypatch, store):
     # nothing to compare against, so the breach has to be taken at face value
     with_client(monkeypatch, FakeKafka(lag=lag(60000)))
     with pytest.raises(AirflowException):
-        task("check_sink_consumer_lag")("sink", **_context())
+        task("sink.check_consumer_lag")("sink", **_context())
 
 
 def test_an_uncommitted_partition_warns_without_failing(monkeypatch, store):
     # it would never clear on its own, and "nothing is consuming" is another check's call
     with_client(monkeypatch, FakeKafka(lag=lag(10, uncommitted=[0, 1])))
-    measured = task("check_sink_consumer_lag")("sink", **_context())
+    measured = task("sink.check_consumer_lag")("sink", **_context())
     assert measured["uncommitted_partitions"] == [0, 1]
 
 
@@ -243,14 +243,14 @@ def test_a_cluster_may_carry_its_own_lag_threshold(monkeypatch, store):
     monkeypatch.setitem(CONFIG["clusters"]["sink"], "lag_threshold", 10)
     with_client(monkeypatch, FakeKafka(lag=lag(25)))
     with pytest.raises(AirflowException, match="threshold 10"):
-        task("check_sink_consumer_lag")("sink", **_context())
+        task("sink.check_consumer_lag")("sink", **_context())
 
 
 # ── the rate comparison ───────────────────────────────────────────────
 
 
 def _compare(throughput, processing, context=None):
-    return task("compare_processing_rate_to_throughput")(
+    return task("sink.compare_processing_rate_to_throughput")(
         throughput, processing, **(context or _context())
     )
 
@@ -282,7 +282,7 @@ def test_nothing_to_compare_against_skips():
 
 
 def test_the_comparison_still_runs_when_the_rate_check_skipped():
-    assert check("compare_processing_rate_to_throughput").trigger_rule == "none_failed"
+    assert check("sink.compare_processing_rate_to_throughput").trigger_rule == "none_failed"
 
 
 # ── structure ─────────────────────────────────────────────────────────
@@ -292,49 +292,49 @@ def test_every_rate_check_bounds_its_window():
     """A mark left behind by an outage would average one interval's work over a gap, which
     reads as a slowdown on the first run back rather than as the gap it is."""
     rates = [
-        "check_message_throughput",
-        "check_source_throughput",
-        "check_processing_rate",
-        "check_dlq_growth",
+        "sink.check_throughput",
+        "source.check_throughput",
+        "sink.check_processing_rate",
+        "sink.check_dlq_growth",
     ]
     assert all(check(t).max_interval_seconds == dag_module.MAX_RATE_WINDOW_SECONDS for t in rates)
 
 
 def test_measurement_tasks_do_not_retry():
     # a retry re-measures and shrinks the window every rate is derived from
-    assert check("check_message_throughput").retries == 0
-    assert check("check_sink_consumer_lag").retries == 0
+    assert check("sink.check_throughput").retries == 0
+    assert check("sink.check_consumer_lag").retries == 0
 
 
 def test_the_sink_checks_wait_on_the_topics_gate():
     # one incident at the bottom of the chain should not send five alerts
-    for task_id in ("check_sink_group_status", "check_sink_consumer_lag", "check_dlq_growth"):
-        assert check(task_id).upstream_task_ids == {"check_topics_exist"}
+    for task_id in ("sink.check_group_status", "sink.check_consumer_lag", "sink.check_dlq_growth"):
+        assert check(task_id).upstream_task_ids == {"sink.check_topics_exist"}
 
 
 def test_a_dead_sink_does_not_blind_the_source_branch():
     # the source queue is the one with a retention deadline, so it gates itself
-    for task_id in ("check_source_group_status", "check_source_consumer_lag"):
-        assert check(task_id).upstream_task_ids == {"check_source_brokers"}
+    for task_id in ("source.check_group_status", "source.check_consumer_lag"):
+        assert check(task_id).upstream_task_ids == {"source.check_brokers"}
 
 
 def test_the_mark_committer_waits_on_every_leaf():
     """ALL_DONE fires as soon as the listed upstreams settle, so a leaf left off the list
     could still be running when the marks are committed and the digest built."""
-    assert check("commit_run_marks").upstream_task_ids == {
-        "check_sink_group_status",
-        "check_sink_consumer_lag",
-        "check_dlq_growth",
-        "compare_processing_rate_to_throughput",
-        "check_source_group_status",
-        "check_source_consumer_lag",
-        "check_source_throughput",
+    assert check("run_tail.commit_run_marks").upstream_task_ids == {
+        "sink.check_group_status",
+        "sink.check_consumer_lag",
+        "sink.check_dlq_growth",
+        "sink.compare_processing_rate_to_throughput",
+        "source.check_group_status",
+        "source.check_consumer_lag",
+        "source.check_throughput",
     }
-    assert check("report_run").upstream_task_ids == {"commit_run_marks"}
-    assert check("mark_run_state").upstream_task_ids == {"report_run"}
+    assert check("run_tail.report_run").upstream_task_ids == {"run_tail.commit_run_marks"}
+    assert check("run_tail.mark_run_state").upstream_task_ids == {"run_tail.report_run"}
 
 
 def test_only_the_report_alerts():
     # one incident trips several checks, so the checks stay quiet and the digest speaks once
-    assert check("report_run").on_failure_callback is not None
-    assert check("check_sink_group_status").on_failure_callback in (None, [])
+    assert check("run_tail.report_run").on_failure_callback is not None
+    assert check("sink.check_group_status").on_failure_callback in (None, [])

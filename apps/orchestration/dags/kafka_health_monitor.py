@@ -9,6 +9,7 @@ from datetime import timedelta
 import pendulum
 from airflow.decorators import dag, task
 from airflow.exceptions import AirflowException, AirflowSkipException
+from airflow.utils.task_group import TaskGroup
 from airflow.utils.trigger_rule import TriggerRule
 
 from dec import dag_config
@@ -85,7 +86,7 @@ def probe_sink_topics(client) -> dict:
 
 def broker_check(cluster_name: str) -> KafkaHealthCheckOperator:
     return KafkaHealthCheckOperator(
-        task_id=f"check_{cluster_name}_brokers",
+        task_id="check_brokers",
         cluster=cluster_template(cluster_name),
         probe=lambda client: probes.topics(client, cluster_name=cluster_name),
         retries=3,
@@ -213,80 +214,78 @@ def kafka_health_monitor():
         log.info("produced %.0f/min, consumed %.0f/min", produced, consumed)
         return record(context, measured)
 
-    # Listing topics round-trips to a broker, so it doubles as the connectivity check.
-    sink_brokers = broker_check("sink")
-    source_brokers = broker_check("source")
-    topics_exist = KafkaHealthCheckOperator(
-        task_id="check_topics_exist",
-        cluster=cluster_template("sink"),
-        probe=probe_sink_topics,
-        predicate=lambda measured: not measured["missing"],
-        message="topic(s) missing from the sink cluster: {missing} — present: {present}",
-    )
-    sink_brokers >> topics_exist
-
-    sink_group_status = check_consumer_group_status.override(task_id="check_sink_group_status")(
-        "sink"
-    )
-    source_group_status = check_consumer_group_status.override(
-        task_id="check_source_group_status"
-    )("source")
-
-    sink_lag = check_consumer_lag.override(task_id="check_sink_consumer_lag")("sink")
-    source_lag = check_consumer_lag.override(task_id="check_source_consumer_lag")("source")
-
-    sink_throughput = RateCheckOperator(
-        task_id="check_message_throughput",
-        state_variable=SETTINGS.state_variable,
-        state_key="throughput.sink",
-        measure=lambda: watermark_total("sink"),
-        min_rate=cluster_threshold("sink", "min_throughput"),
-        max_interval_seconds=MAX_RATE_WINDOW_SECONDS,
-    )
-    source_throughput = RateCheckOperator(
-        task_id="check_source_throughput",
-        state_variable=SETTINGS.state_variable,
-        state_key="throughput.source",
-        measure=lambda: watermark_total("source"),
-        min_rate=cluster_threshold("source", "min_throughput"),
-        max_interval_seconds=MAX_RATE_WINDOW_SECONDS,
-    )
-    processing_rate = RateCheckOperator(
-        task_id="check_processing_rate",
-        state_variable=SETTINGS.state_variable,
-        state_key="committed.sink",
-        # No floor of its own: the comparison below is the judgement.
-        measure=lambda: committed_total("sink"),
-        max_interval_seconds=MAX_RATE_WINDOW_SECONDS,
-    )
-    dlq_growth = RateCheckOperator(
-        task_id="check_dlq_growth",
-        state_variable=SETTINGS.state_variable,
-        state_key="dlq_watermark",
-        # Growth, not depth: a topic's depth only ever rises, so it says nothing about now.
-        measure=lambda: watermark_total("sink", topic_key="dlq_topic"),
-        max_rate=SETTINGS.template("max_dlq_rate"),
-        max_interval_seconds=MAX_RATE_WINDOW_SECONDS,
-    )
-
-    topics_exist >> [sink_group_status, sink_lag, sink_throughput, processing_rate, dlq_growth]
-    source_brokers >> [source_group_status, source_lag, source_throughput]
-    comparison = compare_processing_rate_to_throughput(
-        sink_throughput.output, processing_rate.output
-    )
-
-    add_run_tail(
-        [
+    # Two groups because the clusters fail independently: each gates its own chain,
+    # and a dead sink must not stop the source checks that guard against losing data.
+    with TaskGroup("sink") as sink:
+        # Listing topics round-trips to a broker, so it doubles as the connectivity check.
+        sink_brokers = broker_check("sink")
+        topics_exist = KafkaHealthCheckOperator(
+            task_id="check_topics_exist",
+            cluster=cluster_template("sink"),
+            probe=probe_sink_topics,
+            predicate=lambda measured: not measured["missing"],
+            message="topic(s) missing from the sink cluster: {missing} — present: {present}",
+        )
+        sink_group_status = check_consumer_group_status.override(
+            task_id="check_group_status"
+        )("sink")
+        sink_lag = check_consumer_lag.override(task_id="check_consumer_lag")("sink")
+        sink_throughput = RateCheckOperator(
+            task_id="check_throughput",
+            state_variable=SETTINGS.state_variable,
+            # Keyed on the cluster, not the task, so renaming a task keeps the mark.
+            state_key="throughput.sink",
+            measure=lambda: watermark_total("sink"),
+            min_rate=cluster_threshold("sink", "min_throughput"),
+            max_interval_seconds=MAX_RATE_WINDOW_SECONDS,
+        )
+        processing_rate = RateCheckOperator(
+            task_id="check_processing_rate",
+            state_variable=SETTINGS.state_variable,
+            state_key="committed.sink",
+            # No floor of its own: the comparison below is the judgement.
+            measure=lambda: committed_total("sink"),
+            max_interval_seconds=MAX_RATE_WINDOW_SECONDS,
+        )
+        dlq_growth = RateCheckOperator(
+            task_id="check_dlq_growth",
+            state_variable=SETTINGS.state_variable,
+            state_key="dlq_watermark",
+            # Growth, not depth: a topic's depth only ever rises, so it says nothing about now.
+            measure=lambda: watermark_total("sink", topic_key="dlq_topic"),
+            max_rate=SETTINGS.template("max_dlq_rate"),
+            max_interval_seconds=MAX_RATE_WINDOW_SECONDS,
+        )
+        comparison = compare_processing_rate_to_throughput(
+            sink_throughput.output, processing_rate.output
+        )
+        sink_brokers >> topics_exist
+        topics_exist >> [
             sink_group_status,
             sink_lag,
+            sink_throughput,
+            processing_rate,
             dlq_growth,
-            comparison,
-            source_group_status,
-            source_lag,
-            source_throughput,
-        ],
-        state_variable=SETTINGS.state_variable,
-    )
+        ]
+
+    with TaskGroup("source") as source:
+        source_brokers = broker_check("source")
+        source_group_status = check_consumer_group_status.override(
+            task_id="check_group_status"
+        )("source")
+        source_lag = check_consumer_lag.override(task_id="check_consumer_lag")("source")
+        source_throughput = RateCheckOperator(
+            task_id="check_throughput",
+            state_variable=SETTINGS.state_variable,
+            state_key="throughput.source",
+            measure=lambda: watermark_total("source"),
+            min_rate=cluster_threshold("source", "min_throughput"),
+            max_interval_seconds=MAX_RATE_WINDOW_SECONDS,
+        )
+        source_brokers >> [source_group_status, source_lag, source_throughput]
+
+    # A group stands for its own leaves, so the tail cannot miss one.
+    add_run_tail([sink, source], state_variable=SETTINGS.state_variable)
 
 
 kafka_health_monitor()

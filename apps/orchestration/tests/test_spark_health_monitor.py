@@ -314,9 +314,9 @@ def test_the_freshness_scan_is_bounded_by_the_primary_key():
 def test_the_mark_committer_waits_on_every_leaf():
     """ALL_DONE fires as soon as the listed upstreams settle, so a leaf left off the list
     could still be running when the marks are committed and the digest built."""
-    report = check("report_run")
-    assert report.upstream_task_ids == {"commit_run_marks"}
-    assert check("commit_run_marks").upstream_task_ids == {
+    report = check("run_tail.report_run")
+    assert report.upstream_task_ids == {"run_tail.commit_run_marks"}
+    assert check("run_tail.commit_run_marks").upstream_task_ids == {
         "check_workers_available",
         "check_worker_resources",
         "check_no_concurrent_jobs",
@@ -324,14 +324,14 @@ def test_the_mark_committer_waits_on_every_leaf():
         "check_row_growth",
     }
     assert report.trigger_rule == "all_done"
-    assert check("commit_run_marks").trigger_rule == "all_done"
+    assert check("run_tail.commit_run_marks").trigger_rule == "all_done"
 
 
 def test_only_the_report_alerts():
     # one incident trips more than one check here, so the checks stay quiet and the digest
     # speaks once; the report keeps the callback so an undeliverable digest is not silent
     dag = dag_module.spark_health_monitor()
-    assert dag.get_task("report_run").on_failure_callback is not None
+    assert dag.get_task("run_tail.report_run").on_failure_callback is not None
     assert dag.get_task("check_workers_available").on_failure_callback in (None, [])
 
 

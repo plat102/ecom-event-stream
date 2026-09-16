@@ -1,5 +1,6 @@
 """The three tasks every monitoring DAG ends with."""
 from airflow.decorators import task
+from airflow.utils.task_group import TaskGroup
 from airflow.utils.trigger_rule import TriggerRule
 
 from dec.callbacks.alert import notify_failure
@@ -8,7 +9,11 @@ from dec.marks import commit_marks
 
 
 def add_run_tail(leaves: list, *, state_variable: str) -> None:
-    """`leaves` must name every leaf: ALL_DONE fires once the listed upstreams settle."""
+    """`leaves` must name every leaf — a TaskGroup counts as its own leaves.
+
+    ALL_DONE fires once the listed upstreams settle, so a leaf left out is a leaf the
+    tail does not wait for.
+    """
 
     @task(task_id="commit_run_marks", trigger_rule=TriggerRule.ALL_DONE, retries=0)
     def commit_run_marks(**context) -> dict:
@@ -30,7 +35,12 @@ def add_run_tail(leaves: list, *, state_variable: str) -> None:
         """Colours the run red; the digest has already notified."""
         fail_run_if_checks_failed(context)
 
-    commit = commit_run_marks()
-    # Marks commit before the digest: a failed run still owes the next one a baseline.
+    # Grouped only for the graph; state stays per task, so the digest still tells
+    # `report_run` failing (the alert path is broken) from `mark_run_state` failing
+    # (a check failed, which is this task's job).
+    with TaskGroup("run_tail"):
+        commit = commit_run_marks()
+        # Marks commit before the digest: a failed run still owes the next one a baseline.
+        commit >> report_run() >> mark_run_state()
+
     leaves >> commit
-    commit >> report_run() >> mark_run_state()

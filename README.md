@@ -21,39 +21,39 @@ Reporting is plain SQL views on the star schema, so a changed question is one ed
 ```mermaid
 %%{init: {"flowchart": {"nodeSpacing": 25, "rankSpacing": 45, "padding": 6, "curve": "basis"}}}%%
 flowchart LR
-    SRC@{ img: "docs/attachments/logo/kafka.png", label: "product_view<br/>source Kafka", pos: "b", h: 56, constraint: "on" }
+    SRC@{ img: "https://raw.githubusercontent.com/plat102/ecom-event-stream/main/docs/attachments/logo/kafka.png", label: "product_view<br/>source Kafka", pos: "b", h: 56, constraint: "on" }
 
     subgraph ING[ingestion]
-        BR@{ img: "docs/attachments/logo/python.png", label: "bridge.py - validate", pos: "b", h: 56, constraint: "on" }
-        SINK@{ img: "docs/attachments/logo/python.png", label: "mongo_sink.py", pos: "b", h: 56, constraint: "on" }
+        BR@{ img: "https://raw.githubusercontent.com/plat102/ecom-event-stream/main/docs/attachments/logo/python.png", label: "bridge.py - validate", pos: "b", h: 56, constraint: "on" }
+        SINK@{ img: "https://raw.githubusercontent.com/plat102/ecom-event-stream/main/docs/attachments/logo/python.png", label: "mongo_sink.py", pos: "b", h: 56, constraint: "on" }
     end
 
     subgraph KL[Kafka local]
-        KICON@{ img: "docs/attachments/logo/kafka.png", label: " ", pos: "b", h: 48, constraint: "on" }
+        KICON@{ img: "https://raw.githubusercontent.com/plat102/ecom-event-stream/main/docs/attachments/logo/kafka.png", label: " ", pos: "b", h: 48, constraint: "on" }
         TOPIC[[user-events]]
         DLQ[[user-events-dlq]]
     end
 
     subgraph MDB[MongoDB]
-        MICON@{ img: "docs/attachments/logo/mongodb.png", label: " ", pos: "b", h: 48, constraint: "on" }
+        MICON@{ img: "https://raw.githubusercontent.com/plat102/ecom-event-stream/main/docs/attachments/logo/mongodb.png", label: " ", pos: "b", h: 48, constraint: "on" }
         RAWC[(raw_events)]
     end
 
     subgraph SPK[Spark]
-        SICON@{ img: "docs/attachments/logo/spark.png", label: " ", pos: "b", h: 48, constraint: "on" }
+        SICON@{ img: "https://raw.githubusercontent.com/plat102/ecom-event-stream/main/docs/attachments/logo/spark.png", label: " ", pos: "b", h: 48, constraint: "on" }
         STREAM[streaming DF<br/>parse - validate - enrich]
         BATCH[foreachBatch<br/>upsert dims - write fact]
     end
 
     subgraph PG[PostgreSQL]
-        PICON@{ img: "docs/attachments/logo/postgresql.png", label: " ", pos: "b", h: 48, constraint: "on" }
+        PICON@{ img: "https://raw.githubusercontent.com/plat102/ecom-event-stream/main/docs/attachments/logo/postgresql.png", label: " ", pos: "b", h: 48, constraint: "on" }
         DIMS[(dim tables)]
         FACT[(fact_event)]
         VIEWS[/views/]
     end
 
-    DASH@{ img: "docs/attachments/logo/streamlit.png", label: "Streamlit app", pos: "b", h: 56, constraint: "on" }
-    AF@{ img: "docs/attachments/logo/airflow.png", label: "Airflow health DAGs", pos: "b", h: 56, constraint: "on" }
+    DASH@{ img: "https://raw.githubusercontent.com/plat102/ecom-event-stream/main/docs/attachments/logo/streamlit.png", label: "Streamlit app", pos: "b", h: 56, constraint: "on" }
+    AF@{ img: "https://raw.githubusercontent.com/plat102/ecom-event-stream/main/docs/attachments/logo/airflow.png", label: "Airflow health DAGs", pos: "b", h: 56, constraint: "on" }
 
     SRC --> BR
 	BR -- invalid --> DLQ

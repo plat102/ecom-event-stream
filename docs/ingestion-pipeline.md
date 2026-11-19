@@ -73,4 +73,24 @@ poetry run python apps/ingestion/src/bridge.py
 poetry run python apps/ingestion/src/mongo_sink.py
 ```
 
-`Ctrl+C` on terminal triggers graceful shutdown - last offset is committed before exit.
+`Ctrl+C` (or SIGTERM) stops either process gracefully: it finishes the batch in hand, commits its offsets, and leaves the consumer group at once instead of after the session timeout. See [Delivery guarantee](#delivery-guarantee).
+
+---
+
+## Delivery guarantee
+
+Both processes are **at-least-once**: a Kafka offset is committed only after the events behind it have reached the next stage. A commit covers the last message of every partition in the batch, since committing one message only advances its own partition.
+
+| | `bridge.py` (source → local Kafka) | `mongo_sink.py` (local Kafka → MongoDB) |
+| --- | --- | --- |
+| **Batch** | `BRIDGE_BATCH_SIZE` messages or `BRIDGE_FLUSH_INTERVAL_SECONDS` since the oldest pending one | `BATCH_SIZE` documents or `FLUSH_INTERVAL_SECONDS` since the last write |
+| **Commits when** | both producers are flushed with nothing left in the queue **and** no delivery callback reported an error | `insert_many(ordered=False)` succeeds, or fails on duplicate keys only |
+| **On failure** | raises before the commit; the batch is re-read on restart | 3 attempts (1 s, 2 s backoff), then raises before the commit; the batch is re-read on restart |
+| **On `Ctrl+C` / SIGTERM** | flushes and commits the pending batch, then closes the consumer | writes and commits the partial batch, then closes the consumer and the MongoDB client |
+
+A replay can repeat at most the one uncommitted batch per process. Downstream:
+
+- MongoDB rejects a replayed document that carries the source `_id` (duplicate key, `E11000`); the sink treats that as already written and commits. An event without `_id` gets a fresh `ObjectId`, so its replay is stored twice in `raw_events`.
+- The warehouse writer inserts with `ON CONFLICT (event_id) DO NOTHING`, so a replay never duplicates `fact_event` (see [data-processing.md](data-processing.md)).
+
+The graceful drain does not prevent loss (uncommitted events are re-read anyway); it avoids redoing up to one batch after every restart.

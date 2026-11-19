@@ -1,8 +1,15 @@
 """
 MongoDB Sink: consume from user-events, batch-insert into raw_events collection.
 
-Commit Kafka offset only after MongoDB insert succeeds (at-least-once delivery).
-Sequence: buffer event → batch full or timeout → insert_many(ordered=False) → commit offset
+Kafka offsets are committed only after the batch is in MongoDB (at-least-once delivery):
+insert_many succeeded, or failed on duplicate keys only (a replayed batch). The commit
+covers the last offset of every partition in the batch. A batch that still fails after
+retries raises before the commit, so it is re-read on restart.
+Sequence: buffer event → [batch full or timeout] → insert_many(ordered=False) → commit
+
+SIGINT/SIGTERM stops the loop; the partial batch is written and committed, then the
+consumer leaves the group and the MongoDB client closes. After a crash nothing more is
+written; the uncommitted events are re-read on restart.
 
 Usage:
     poetry run python apps/ingestion/src/mongo_sink.py
@@ -15,8 +22,8 @@ from datetime import datetime, timezone
 from pymongo.errors import BulkWriteError
 
 from shared.config.settings import settings
-from shared.connectors.kafka import make_sink_consumer
-from shared.connectors.mongodb import make_mongo_client
+from shared.connectors.kafka import KafkaConsumerClient, make_sink_consumer
+from shared.connectors.mongodb import MongoDBClient, make_mongo_client
 from shared.utils.logger import get_logger
 
 log = get_logger("mongo_sink")
@@ -86,19 +93,40 @@ class MongoDBWriter:
 
 
 class MongoSink:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        consumer: KafkaConsumerClient | None = None,
+        mongo_client: MongoDBClient | None = None,
+        buffer: EventBuffer | None = None,
+        writer: MongoDBWriter | None = None,
+    ) -> None:
+        # defaults build the real clients; tests inject fakes
         self._running = True
-        self._consumer = make_sink_consumer(settings, CONSUMER_GROUP)
-        mongo_client = make_mongo_client(settings)
-        collection = mongo_client.get_collection(COLLECTION)
-        self._buffer = EventBuffer(settings.BATCH_SIZE, settings.FLUSH_INTERVAL_SECONDS)
-        self._writer = MongoDBWriter(collection)
+        if consumer is None:
+            consumer = make_sink_consumer(settings, CONSUMER_GROUP)
+        if mongo_client is None:
+            mongo_client = make_mongo_client(settings)
+        if buffer is None:
+            buffer = EventBuffer(settings.BATCH_SIZE, settings.FLUSH_INTERVAL_SECONDS)
+        if writer is None:
+            writer = MongoDBWriter(mongo_client.get_collection(COLLECTION))
+        self._consumer = consumer
+        self._mongo_client = mongo_client  # kept so shutdown can close it
+        self._buffer = buffer
+        self._writer = writer
 
     def run(self) -> None:
-        self._consumer.subscribe(topics=[settings.SINK_KAFKA_TOPIC])
-        self._consumer.wait_for_assignment()
-        log.info(f"mongo_sink started — consuming from {settings.SINK_KAFKA_TOPIC}")
+        try:
+            self._consumer.subscribe(topics=[settings.SINK_KAFKA_TOPIC])
+            self._consumer.wait_for_assignment()
+            log.info(f"mongo_sink started — consuming from {settings.SINK_KAFKA_TOPIC}")
+            self._poll_loop()
+            # only a clean stop drains: after a crash, retrying the write would mask the error
+            self._drain()
+        finally:
+            self._close()
 
+    def _poll_loop(self) -> None:
         idle_polls = 0
         while self._running:
             msg = self._consumer.poll()
@@ -108,9 +136,7 @@ class MongoSink:
                     log.info(f"still running — idle for ~{idle_polls}s")
                 # flush on idle too — time-based trigger fires most often when traffic is low
                 if self._buffer.should_flush():
-                    docs, msgs = self._buffer.flush()
-                    if docs:  # guard: timeout can fire on empty buffer
-                        self._writer.write(docs, self._consumer, msgs)
+                    self._write_buffer()
                 continue
             if msg.error():
                 log.error(msg.error())
@@ -127,9 +153,31 @@ class MongoSink:
             self._buffer.append(doc, msg)
 
             if self._buffer.should_flush():
-                docs, msgs = self._buffer.flush()
-                if docs:
-                    self._writer.write(docs, self._consumer, msgs)
+                self._write_buffer()
+
+    def _write_buffer(self) -> int:
+        docs, msgs = self._buffer.flush()
+        if docs:  # guard: timeout can fire on empty buffer
+            self._writer.write(docs, self._consumer, msgs)
+        return len(docs)
+
+    def _drain(self) -> None:
+        """Write the partial batch while the consumer still owns its partitions.
+
+        Without this, a stop discards up to a batch of buffered events; their offsets are
+        uncommitted, so they are re-read on restart (no loss), but that work is wasted.
+        """
+        written = self._write_buffer()
+        if written:
+            log.info(f"drained {written} buffered doc(s) on shutdown")
+
+    def _close(self) -> None:
+        """Leave the consumer group now rather than after the session timeout."""
+        try:
+            self._consumer.close()
+        finally:
+            self._mongo_client.close()
+            log.info("mongo_sink stopped")
 
 
 if __name__ == "__main__":
